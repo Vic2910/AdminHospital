@@ -1,11 +1,17 @@
 import type { Page } from '../types'
 
 const endpointConnectedPages = new Set<Page>([
+  'Laboratorios',
+  'Ambulancia',
+  'Configuración',
+  'Mi perfil',
+  'Acerca del hospital',
+  'Cómo llegar',
+  'Recepción',
+  'Habitaciones y Camas',
   'Resumen general',
-  'Usuarios y roles',
-  'Pacientes e ingresos',
-  'Expediente Clínico',
-  'Citas y Turnos',
+  'Personal hospitalario',
+  'Horarios y turnos',
 ])
 
 export function isEndpointConnectedPage(page: Page): boolean {

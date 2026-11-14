@@ -3,13 +3,18 @@ import type { Page } from '../types'
 
 export function PageHeading({ page }: { page: Page }) {
   const descriptions: Record<Page, string> = {
+    'Laboratorios': 'Procesa exámenes, valida resultados y gestiona su publicación autorizada.',
+    'Mi perfil': 'Consulta tu cuenta y actualiza tus datos de contacto.',
+    'Acerca del hospital': 'Información institucional registrada por administración.',
+    'Cómo llegar': 'Consulta la ubicación oficial del hospital.',
+    'Recepción': 'Revisa solicitudes, verifica expedientes y programa citas.',
     'Resumen general': 'Vista general de la operación hospitalaria, pacientes, personal y servicios.',
-    'Usuarios y roles': 'Administra los usuarios, sus permisos y accesos al sistema.',
+    'Personal hospitalario': 'Registra doctores y recepcionistas, gestiona sus datos, especialidades y estado.',
     'Pacientes e ingresos': 'Controla ingresos, hospitalización y seguimiento de pacientes.',
     'Expediente Clínico': 'Consulta y gestiona el historial clínico integral del paciente.',
     'Citas y Turnos': 'Gestiona la programación de consultas y los turnos de atención.',
     'Habitaciones y Camas': 'Controla la ocupación, disponibilidad y asignación de camas hospitalarias.',
-    'Turnos del Personal': 'Planifica horarios, cobertura y disponibilidad del personal hospitalario.',
+    'Horarios y turnos': 'Planifica horarios, cobertura y disponibilidad del personal hospitalario.',
     'Inventario y Recursos': 'Controla suministros médicos, equipos y niveles de existencias.',
     'Ambulancia': 'Monitorea la unidad hospitalaria, su disponibilidad y los despachos de emergencia.',
     'Reportes y Analítica': 'Indicadores estratégicos, estadísticas clínicas y reportes de gestión hospitalaria.',
@@ -19,7 +24,7 @@ export function PageHeading({ page }: { page: Page }) {
     return (
       <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-xl font-semibold tracking-tight text-[#870b30] sm:text-2xl">Tablero General del Hospital Universitario</h1>
+          <h1 className="text-xl font-semibold tracking-tight text-[#870b30] sm:text-2xl">Panel general</h1>
           <p className="mt-1 text-xs text-slate-500">{descriptions[page]}</p>
         </div>
         <p className="text-[10px] text-slate-400">

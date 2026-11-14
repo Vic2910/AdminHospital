@@ -12,11 +12,7 @@ export function AuthGate({
   const [loading, setLoading] = useState(() => Boolean(supabase))
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [passwordConfirmation, setPasswordConfirmation] = useState('')
   const [showPassword, setShowPassword] = useState(false)
-  const [givenNames, setGivenNames] = useState('')
-  const [familyNames, setFamilyNames] = useState('')
-  const [mode, setMode] = useState<'sign-in' | 'sign-up'>('sign-in')
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [submitting, setSubmitting] = useState(false)
@@ -72,50 +68,6 @@ export function AuthGate({
     }
   }
 
-  async function handleSignUp(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    if (!supabase) return
-    if (password !== passwordConfirmation) {
-      setError('Las contraseñas no coinciden.')
-      return
-    }
-
-    setSubmitting(true)
-    setError('')
-    setNotice('')
-    try {
-      const { data, error: signUpError } = await supabase.auth.signUp({
-        email,
-        password,
-        options: {
-          data: {
-            display_name: `${givenNames.trim()} ${familyNames.trim()}`.trim(),
-            given_names: givenNames.trim(),
-            family_names: familyNames.trim(),
-          },
-          emailRedirectTo: window.location.origin,
-        },
-      })
-      if (signUpError) {
-        setError(signUpError.message)
-        return
-      }
-
-      setPassword('')
-      setPasswordConfirmation('')
-      if (data.session) {
-        setNotice('Cuenta creada. Para usar las funciones del hospital, solicita a la administración que te asigne el rol correspondiente.')
-      } else {
-        setNotice('Supabase aceptó la solicitud, pero no inició sesión. Revisa la configuración de confirmación de correo en Supabase Auth.')
-        setMode('sign-in')
-      }
-    } catch (signUpError) {
-      setError(signUpError instanceof Error ? signUpError.message : 'No se pudo crear la cuenta.')
-    } finally {
-      setSubmitting(false)
-    }
-  }
-
   async function handlePasswordReset() {
     if (!supabase) return
     if (!email.trim()) {
@@ -141,12 +93,6 @@ export function AuthGate({
     } finally {
       setSubmitting(false)
     }
-  }
-
-  function changeMode(nextMode: 'sign-in' | 'sign-up') {
-    setMode(nextMode)
-    setError('')
-    setNotice('')
   }
 
   async function signOut() {
@@ -192,7 +138,7 @@ export function AuthGate({
                 </svg>
               </span>
             </span>
-            <h1 className="mt-5 text-xl font-semibold tracking-tight sm:text-2xl">Hospital Universitario</h1>
+            <h1 className="mt-5 text-xl font-semibold tracking-tight sm:text-2xl">Hospital Moviles</h1>
             <p className="mt-1 text-xs text-white/90">Santa Ana</p>
             <p className="mt-3 text-sm text-white/70">Plataforma de atención hospitalaria</p>
           </div>
@@ -201,31 +147,20 @@ export function AuthGate({
               <p>Atención médica conectada, segura y eficiente</p>
               <p className="mt-2 text-white/50">Sistema de gestión hospitalaria.</p>
             </div>
-            <p className="mt-8 text-[10px] text-white/55">© Hospital Universitario San Gabriel</p>
+            <p className="mt-8 text-[10px] text-white/55">© Hospital Moviles</p>
           </div>
         </section>
 
         <section className="flex flex-col items-center justify-center bg-[#faf8f9] px-5 py-8 sm:px-8">
-          <form className="w-full max-w-[420px] rounded-xl bg-white px-6 py-7 sm:px-9 sm:py-8" onSubmit={mode === 'sign-in' ? handleSignIn : handleSignUp}>
+          <form className="w-full max-w-[420px] rounded-xl bg-white px-6 py-7 sm:px-9 sm:py-8" onSubmit={handleSignIn}>
             <div className="mb-6">
               <h2 className="text-lg font-semibold tracking-tight text-slate-800">
-                {mode === 'sign-in' ? 'Bienvenido de nuevo' : 'Crea tu cuenta'}
+                Bienvenido de nuevo
               </h2>
               <p className="mt-1 text-xs text-slate-500">
-                {mode === 'sign-in' ? 'Inicia sesión con tu cuenta institucional' : 'Regístrate para solicitar acceso institucional'}
+                Inicia sesión con tu cuenta de personal autorizado
               </p>
             </div>
-
-            {mode === 'sign-up' && (
-              <div className="mb-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <label className="block text-xs font-medium text-slate-700">Nombres
-                  <input autoComplete="given-name" className="mt-1.5 w-full rounded-md bg-[#f8f6f7] px-3 py-2.5 text-sm outline-none ring-1 ring-transparent focus:ring-[#870b30]/30" maxLength={100} onChange={(event) => setGivenNames(event.target.value)} required value={givenNames} />
-                </label>
-                <label className="block text-xs font-medium text-slate-700">Apellidos
-                  <input autoComplete="family-name" className="mt-1.5 w-full rounded-md bg-[#f8f6f7] px-3 py-2.5 text-sm outline-none ring-1 ring-transparent focus:ring-[#870b30]/30" maxLength={100} onChange={(event) => setFamilyNames(event.target.value)} required value={familyNames} />
-                </label>
-              </div>
-            )}
 
             <label className="mb-3 block text-xs font-medium text-slate-700">Correo electrónico
               <span className="mt-1.5 flex items-center rounded-md bg-[#f8f6f7] px-3 focus-within:ring-1 focus-within:ring-[#870b30]/30">
@@ -237,42 +172,28 @@ export function AuthGate({
             <label className="block text-xs font-medium text-slate-700">Contraseña
               <span className="mt-1.5 flex items-center rounded-md bg-[#f8f6f7] px-3 focus-within:ring-1 focus-within:ring-[#870b30]/30">
                 <Icon className="shrink-0 text-[#870b30]" name="lock" size={13} />
-                <input autoComplete={mode === 'sign-in' ? 'current-password' : 'new-password'} className="min-w-0 flex-1 bg-transparent px-2.5 py-2.5 text-sm outline-none" minLength={mode === 'sign-up' ? 8 : undefined} onChange={(event) => setPassword(event.target.value)} required type={showPassword ? 'text' : 'password'} value={password} />
+                <input autoComplete="current-password" className="min-w-0 flex-1 bg-transparent px-2.5 py-2.5 text-sm outline-none"  onChange={(event) => setPassword(event.target.value)} required type={showPassword ? 'text' : 'password'} value={password} />
                 <button aria-label={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'} className="shrink-0 text-slate-400 hover:text-slate-700" onClick={() => setShowPassword((visible) => !visible)} type="button">
                   <Icon name={showPassword ? 'eyeOff' : 'eye'} size={13} />
                 </button>
               </span>
             </label>
 
-            {mode === 'sign-in' && (
               <div className="mt-2 flex justify-end">
                 <button className="text-xs text-[#870b30] hover:underline disabled:opacity-60" disabled={submitting} onClick={() => void handlePasswordReset()} type="button">
                   ¿Olvidaste tu contraseña?
                 </button>
               </div>
-            )}
-
-            {mode === 'sign-up' && (
-              <label className="mt-3 block text-xs font-medium text-slate-700">Confirmar contraseña
-                <input autoComplete="new-password" className="mt-1.5 w-full rounded-md bg-[#f8f6f7] px-3 py-2.5 text-sm outline-none ring-1 ring-transparent focus:ring-[#870b30]/30" minLength={8} onChange={(event) => setPasswordConfirmation(event.target.value)} required type={showPassword ? 'text' : 'password'} value={passwordConfirmation} />
-              </label>
-            )}
 
             {notice && <p className="mt-4 rounded-md bg-emerald-50 p-2.5 text-xs leading-relaxed text-emerald-800" role="status">{notice}</p>}
             {error && <p className="mt-4 rounded-md bg-rose-50 p-2.5 text-xs text-rose-800" role="alert">{error}</p>}
 
             <button className="mt-5 flex w-full items-center justify-center gap-2 rounded-md bg-[#800b2c] px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#6f0827] disabled:opacity-60" disabled={submitting} type="submit">
-              {submitting ? (mode === 'sign-in' ? 'Iniciando sesión...' : 'Creando cuenta...') : (mode === 'sign-in' ? 'Iniciar sesión' : 'Crear cuenta')}
+              {submitting ? 'Iniciando sesión...' : 'Iniciar sesión'}
               {!submitting && <Icon name="arrowRight" size={13} />}
             </button>
             <p className="mt-4 text-center text-xs text-slate-500">Acceso exclusivo para personal autorizado</p>
 
-            <p className="mt-5 text-center text-xs text-slate-500">
-              {mode === 'sign-in' ? '¿Aún no tienes cuenta?' : '¿Ya tienes una cuenta?'}{' '}
-              <button className="font-semibold text-[#870b30] hover:underline" disabled={submitting} onClick={() => changeMode(mode === 'sign-in' ? 'sign-up' : 'sign-in')} type="button">
-                {mode === 'sign-in' ? 'Crear cuenta' : 'Volver a iniciar sesión'}
-              </button>
-            </p>
           </form>
           <p className="mt-5 text-center text-xs text-slate-500">Una sola plataforma · Acceso según tu rol</p>
         </section>

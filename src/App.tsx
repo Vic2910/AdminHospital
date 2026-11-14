@@ -1,44 +1,56 @@
 import { lazy, Suspense, useEffect, useState } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { AuthGate } from './components/AuthGate'
+import { AdminGate } from './components/AdminGate'
 import { Sidebar } from './components/Sidebar'
 import { Topbar } from './components/Topbar'
 import { PageHeading } from './components/PageHeading'
-import { isEndpointConnectedPage } from './lib/pageAvailability'
+import type { PanelNotification } from './lib/panel'
+import { panelNoticeTarget } from './lib/panelNavigation'
 import { readMyAccess, type UserAccess } from './lib/api'
 import type { Page } from './types'
+import type { ReceptionTab } from './pages/ReceptionPage'
+
+const ReceptionPage = lazy(() => import('./pages/ReceptionPage').then(({ ReceptionPage }) => ({ default: ReceptionPage })))
 
 const GeneralDashboard = lazy(() => import('./pages/GeneralDashboard').then(({ GeneralDashboard }) => ({ default: GeneralDashboard })))
-const UsersPage = lazy(() => import('./pages/UsersPage').then(({ UsersPage }) => ({ default: UsersPage })))
-const PatientsPage = lazy(() => import('./pages/PatientsPage').then(({ PatientsPage }) => ({ default: PatientsPage })))
-const ClinicalRecordPage = lazy(() => import('./pages/ClinicalRecordPage').then(({ ClinicalRecordPage }) => ({ default: ClinicalRecordPage })))
-const AppointmentsPage = lazy(() => import('./pages/AppointmentsPage').then(({ AppointmentsPage }) => ({ default: AppointmentsPage })))
+const EmployeesPage = lazy(() => import('./pages/EmployeesPage').then(({ EmployeesPage }) => ({ default: EmployeesPage })))
 const RoomsPage = lazy(() => import('./pages/RoomsPage').then(({ RoomsPage }) => ({ default: RoomsPage })))
 const StaffShiftsPage = lazy(() => import('./pages/StaffShiftsPage').then(({ StaffShiftsPage }) => ({ default: StaffShiftsPage })))
 const InventoryPage = lazy(() => import('./pages/InventoryPage').then(({ InventoryPage }) => ({ default: InventoryPage })))
 const AmbulancePage = lazy(() => import('./pages/AmbulancePage').then(({ AmbulancePage }) => ({ default: AmbulancePage })))
 const ReportsPage = lazy(() => import('./pages/ReportsPage').then(({ ReportsPage }) => ({ default: ReportsPage })))
 const ConfigurationPage = lazy(() => import('./pages/ConfigurationPage').then(({ ConfigurationPage }) => ({ default: ConfigurationPage })))
+const ProfilePage = lazy(() => import('./pages/ProfilePage').then(({ ProfilePage }) => ({ default: ProfilePage })))
+const InstitutionPage = lazy(() => import('./pages/InstitutionPage').then(({ InstitutionPage }) => ({ default: InstitutionPage })))
+const LaboratoryPage = lazy(() => import('./pages/LaboratoryPage').then(({ LaboratoryPage }) => ({ default: LaboratoryPage })))
 
 function HospitalApp({ session, onSignOut }: { session: Session; onSignOut: () => Promise<void> }) {
   const [page, setPage] = useState<Page>('Resumen general')
-  const [showUnconnectedModules, setShowUnconnectedModules] = useState(false)
-  const [chartPatient, setChartPatient] = useState<{ id: string; isDoctor: boolean } | null>(null)
+  const [receptionTab, setReceptionTab] = useState<ReceptionTab>('Solicitudes de atención')
+  const [planningStaffId, setPlanningStaffId] = useState('')
+  const showUnconnectedModules = false
+  const [receptionRequestId, setReceptionRequestId] = useState<string | null>(null)
+  const [hospitalAdmissionId, setHospitalAdmissionId] = useState<string | null>(null)
+  const [transportRequestId, setTransportRequestId] = useState<string | null>(null)
+  const [transportUnitId, setTransportUnitId] = useState<number | null>(null)
+  const [laboratoryOrderId, setLaboratoryOrderId] = useState<string | null>(null)
   const [accessState, setAccessState] = useState<{ access: UserAccess | null; loading: boolean; error: string }>({
     access: null,
     loading: true,
     error: '',
   })
-  const isReceptionist = accessState.access?.roles.some((role) =>
-    ['receptionist', 'front_desk', 'reception'].includes(role.code),
-  ) ?? false
-  const isAdministrator = !isReceptionist
-    && (accessState.access?.roles.some((role) => role.code === 'administrator') ?? false)
+  const isAdministrator = accessState.access?.isAdministrator === true
+  const isReceptionist = accessState.access?.roles.some(role => role.code === 'recepcionista') === true
+  const canLaboratory = isAdministrator || accessState.access?.laboratory?.can_view === true
 
   useEffect(() => {
     let active = true
     readMyAccess().then((access) => {
-      if (active) setAccessState({ access, loading: false, error: '' })
+      if (active) {
+        setAccessState({ access, loading: false, error: '' })
+        setPage(access.isAdministrator ? 'Resumen general' : access.roles.some(r => r.code === 'recepcionista') ? 'Recepción' : 'Laboratorios')
+      }
     }).catch((loadError: unknown) => {
       if (active) setAccessState({
         access: null,
@@ -51,57 +63,60 @@ function HospitalApp({ session, onSignOut }: { session: Session; onSignOut: () =
     }
   }, [])
 
-  useEffect(() => {
-    if (!accessState.loading && page === 'Usuarios y roles' && !isAdministrator) {
-      setPage('Resumen general')
-    }
-  }, [accessState.loading, isAdministrator, page])
-
-  function toggleUnconnectedModules() {
-    const showModules = !showUnconnectedModules
-    setShowUnconnectedModules(showModules)
-    if (!showModules && !isEndpointConnectedPage(page)) setPage('Resumen general')
-  }
-
   function navigate(nextPage: Page) {
-    if (nextPage === 'Usuarios y roles' && !isAdministrator) return
+    if (['Citas y Turnos', 'Pacientes e ingresos', 'Expediente Clínico'].includes(nextPage)) return
+    if (!isAdministrator && !['Mi perfil', 'Acerca del hospital', 'Cómo llegar'].includes(nextPage) && !(isReceptionist && ['Recepción', 'Ambulancia'].includes(nextPage)) && !(canLaboratory && nextPage === 'Laboratorios')) return
+    if (nextPage === 'Recepción' && !isAdministrator && !isReceptionist) return
+    if ((nextPage === 'Personal hospitalario' || nextPage === 'Horarios y turnos') && !isAdministrator) return
     setPage(nextPage)
-    if (nextPage !== 'Expediente Clínico') setChartPatient(null)
+    setReceptionRequestId(null); setHospitalAdmissionId(null); setTransportRequestId(null); setTransportUnitId(null)
+    setLaboratoryOrderId(null)
+    if (nextPage === 'Recepción') setReceptionTab('Solicitudes de atención')
   }
+
+  function openNotification(notice: PanelNotification) {
+    const target = panelNoticeTarget(notice)
+    if (!target) return
+    if (target.page === 'Laboratorios' && !canLaboratory) return
+    setReceptionRequestId(null); setHospitalAdmissionId(null); setTransportRequestId(null); setTransportUnitId(null)
+    setPage(target.page)
+    if (target.page === 'Laboratorios') setLaboratoryOrderId(target.id)
+    else if (target.page === 'Recepción') { setReceptionTab(target.tab); if (target.tab === 'Solicitudes de atención') setReceptionRequestId(target.id); else setHospitalAdmissionId(target.id) }
+    else if (target.requestId) setTransportRequestId(target.requestId)
+    else if (target.unitId) setTransportUnitId(target.unitId)
+  }
+
+  if (accessState.loading) return <main className="flex min-h-screen items-center justify-center bg-[#f7f8fa] text-sm text-slate-500" role="status">Preparando tu panel…</main>
+  if (accessState.error) return <main className="flex min-h-screen items-center justify-center bg-[#f7f8fa] p-5"><div className="rounded-xl bg-white p-6"><p role="alert">{accessState.error}</p><button className="mt-4 text-sm text-[#800b2c]" onClick={() => void onSignOut()}>Cerrar sesión</button></div></main>
 
   return (
     <div className="min-h-screen bg-[#f7f8fa] text-slate-800 md:flex">
-      <Sidebar isAdministrator={isAdministrator} onNavigate={navigate} page={page} showUnconnectedModules={showUnconnectedModules} />
+      <Sidebar isAdministrator={isAdministrator} isReceptionist={isReceptionist} canLaboratory={canLaboratory} onNavigate={navigate} page={page} showUnconnectedModules={showUnconnectedModules} />
       <div className="min-w-0 flex-1">
-        <Topbar onSignOut={onSignOut} onToggleUnconnectedModules={toggleUnconnectedModules} session={session} showUnconnectedModules={showUnconnectedModules} />
+        <Topbar onSignOut={onSignOut} onNavigate={navigate} isAdministrator={isAdministrator} onOpenNotification={openNotification} session={session} />
         <main className="mx-auto max-w-[1600px] px-4 py-5 sm:px-7 sm:py-7">
           <PageHeading page={page} />
           <Suspense fallback={<p className="rounded-lg bg-white p-5 text-xs text-slate-500">Cargando pantalla...</p>}>
-            {page === 'Resumen general' && <GeneralDashboard showUnconnected={showUnconnectedModules} />}
-            {page === 'Usuarios y roles' && (accessState.loading
+            {page === 'Recepción' && (isAdministrator || isReceptionist) && <ReceptionPage key={`${receptionTab}-${receptionRequestId}-${hospitalAdmissionId}`} initialTab={receptionTab} initialRequestId={receptionRequestId} initialHospitalAdmissionId={hospitalAdmissionId} />}
+            {page === 'Laboratorios' && canLaboratory && <LaboratoryPage key={laboratoryOrderId ?? 'orders'} initialOrderId={laboratoryOrderId} />}
+            {page === 'Resumen general' && isAdministrator && <GeneralDashboard onNavigate={navigate} onOpenReception={tab => { setReceptionTab(tab); setPage('Recepción') }} />}
+            {page === 'Personal hospitalario' && (accessState.loading
               ? <p className="rounded-lg bg-white p-5 text-xs text-slate-500" role="status">Verificando permisos administrativos...</p>
               : accessState.error
                 ? <p className="rounded-lg bg-rose-50 p-4 text-xs text-rose-800" role="alert">{accessState.error}</p>
-                : isAdministrator && <UsersPage />)}
-            {page === 'Pacientes e ingresos' && <PatientsPage onViewChart={(patientId, isDoctor) => {
-              setChartPatient({ id: patientId, isDoctor })
-              setPage('Expediente Clínico')
-            }} />}
-            {page === 'Expediente Clínico' && <ClinicalRecordPage onBack={() => navigate('Pacientes e ingresos')} patientId={chartPatient?.id ?? null} isDoctor={chartPatient?.isDoctor ?? false} />}
-            {page === 'Citas y Turnos' && <AppointmentsPage onViewChart={(patientId) => {
-              setChartPatient({ id: patientId, isDoctor: true })
-              setPage('Expediente Clínico')
-            }} />}
+                : isAdministrator && <EmployeesPage onSchedule={staffId => { setPlanningStaffId(staffId ?? ''); setPage('Horarios y turnos') }} />)}
             {page === 'Habitaciones y Camas' && <RoomsPage />}
-            {page === 'Turnos del Personal' && <StaffShiftsPage />}
+            {page === 'Horarios y turnos' && isAdministrator && <StaffShiftsPage initialStaffId={planningStaffId} />}
             {page === 'Inventario y Recursos' && <InventoryPage />}
-            {page === 'Ambulancia' && <AmbulancePage />}
+            {page === 'Ambulancia' && (isAdministrator || isReceptionist) && <AmbulancePage key={transportRequestId ?? `fleet-${transportUnitId}`} initialRequestId={transportRequestId} initialUnitId={transportUnitId} />}
             {page === 'Reportes y Analítica' && <ReportsPage />}
-            {page === 'Configuración' && <ConfigurationPage />}
+            {page === 'Configuración' && isAdministrator && <ConfigurationPage />}
+            {page === 'Mi perfil' && <ProfilePage />}
+            {(page === 'Acerca del hospital' || page === 'Cómo llegar') && <InstitutionPage key={page} directions={page === 'Cómo llegar'} isAdmin={isAdministrator} onConfiguration={() => navigate('Configuración')} />}
           </Suspense>
           <footer className="mt-5 flex items-center justify-between border-t border-slate-200 py-3 text-[9px] text-slate-400">
-            <span>Hospital Universitario · San Gabriel</span>
-            <span className="flex items-center gap-1"><span className="h-1.5 w-1.5 rounded-full bg-emerald-500" /> Datos actualizados hace unos segundos</span>
+            <span>Hospital Moviles · Hospital Moviles</span>
+            <span className="flex items-center gap-1"><span className="h-1.5 w-1.5 rounded-full bg-emerald-500" /> Acceso según los permisos de tu cuenta</span>
           </footer>
         </main>
       </div>
@@ -110,7 +125,7 @@ function HospitalApp({ session, onSignOut }: { session: Session; onSignOut: () =
 }
 
 function App() {
-  return <AuthGate>{(session, signOut) => <HospitalApp onSignOut={signOut} session={session} />}</AuthGate>
+  return <AuthGate>{(session, signOut) => <AdminGate key={session.user.id} onSignOut={signOut}><HospitalApp onSignOut={signOut} session={session} /></AdminGate>}</AuthGate>
 }
 
 export default App

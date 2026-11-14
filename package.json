@@ -1,5 +1,5 @@
 {
-  "name": "hospitaluniversitarioweb",
+  "name": "hospital-moviles-web",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -7,7 +7,10 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
-    "preview": "vite preview"
+    "test:planning": "node --test tests/planning-dates.test.mjs tests/supabase-config.test.mjs tests/planning-acceptance-guard.test.mjs",
+    "test:planning:database": "node tests/planning-concurrency.mjs",
+    "preview": "vite preview",
+    "build:staging": "tsc -b && vite build --mode staging --outDir dist-staging"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.118.0",

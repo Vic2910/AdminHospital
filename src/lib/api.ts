@@ -1,4 +1,6 @@
 import { supabase } from './supabase'
+import type { LaboratoryAccess } from './laboratory'
+
 
 export interface Facility {
   id: string
@@ -59,6 +61,8 @@ export interface HospitalOverview {
 }
 
 export interface UserAccess {
+  isAdministrator: boolean
+  laboratory?: LaboratoryAccess
   profileId: string | null
   roles: Array<{ facilityId: string; code: string }>
   permissions: Array<{ facilityId: string; code: string }>
@@ -123,141 +127,38 @@ export interface LaboratoryTest {
   name: string
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
-}
-
-function requiredString(row: Record<string, unknown>, key: string, context: string): string {
-  const value = row[key]
-  if (typeof value !== 'string') throw new Error(`${context}: campo "${key}" inválido.`)
-  return value
-}
-
-function optionalString(row: Record<string, unknown>, key: string, context: string): string | null {
-  const value = row[key]
-  if (value !== null && typeof value !== 'string') throw new Error(`${context}: campo "${key}" inválido.`)
-  return value
-}
-
-function requiredNumber(row: Record<string, unknown>, key: string, context: string): number {
-  const value = row[key]
-  if (typeof value !== 'number' || !Number.isFinite(value)) throw new Error(`${context}: campo "${key}" inválido.`)
-  return value
-}
-
 export function getAuthorizationErrorMessage(error: unknown, permission: string): string | null {
-  if (!isRecord(error) || error.code !== '42501') return null
-  return `Supabase rechazó la operación por permisos insuficientes. Verifica que tu usuario tenga "${permission}" asignado para la institución seleccionada.`
-}
-
-function parseRows<T>(data: unknown, context: string, parse: (row: Record<string, unknown>) => T): T[] {
-  if (!Array.isArray(data)) throw new Error(`${context}: se esperaba una lista.`)
-  return data.map((value) => {
-    if (!isRecord(value)) throw new Error(`${context}: registro con formato inválido.`)
-    return parse(value)
-  })
+  if (!error || typeof error !== 'object' || !('code' in error) || error.code !== '42501') return null
+  return 'Hospital Moviles rechaz? la operaci?n. Revisa el permiso: ' + permission
 }
 
 export async function readFacilities(): Promise<Facility[]> {
-  const rows = await readPublicView('catalog_facilities')
-  return parseRows(rows, 'Catálogo de instituciones', (row) => {
-    if (typeof row.active !== 'boolean') throw new Error('Catálogo de instituciones: campo "active" inválido.')
-    return {
-      id: requiredString(row, 'id', 'Catálogo de instituciones'),
-      name: requiredString(row, 'name', 'Catálogo de instituciones'),
-      active: row.active,
-    }
-  }).filter((facility) => facility.active)
+  throw new Error('La conexi?n Auth de Hospital Moviles est? configurada. Falta verificar su esquema y conectar este m?dulo de datos.')
 }
 
 export async function readMyAccess(): Promise<UserAccess> {
-  if (!supabase) throw new Error('Supabase no está configurado. Revisa las variables de entorno.')
-  const { data, error } = await supabase.rpc('my_access')
+  if (!supabase) throw new Error('Falta configurar Supabase.')
+  const { data: identity, error: identityError } = await supabase.auth.getUser()
+  if (identityError || !identity.user) throw new Error('Inicia sesión nuevamente.')
+  const [{ data, error }, laboratory] = await Promise.all([supabase.from('user_roles').select('role').eq('user_id', identity.user.id).eq('active', true), supabase.rpc('my_laboratory_access')])
   if (error) throw error
-  if (!isRecord(data) || !Array.isArray(data.roles)) {
-    throw new Error('Permisos del usuario: respuesta con formato inválido.')
-  }
-  return {
-    profileId: isRecord(data.profile) && typeof data.profile.id === 'string' ? data.profile.id : null,
-    roles: data.roles.map((value) => {
-      if (!isRecord(value)) throw new Error('Permisos del usuario: rol con formato inválido.')
-      return {
-        facilityId: requiredString(value, 'facility_id', 'Permisos del usuario'),
-        code: requiredString(value, 'code', 'Permisos del usuario'),
-      }
-    }),
-    permissions: parseRows(data.permissions, 'Permisos del usuario', (value) => ({
-      facilityId: requiredString(value, 'facility_id', 'Permisos del usuario'),
-      code: requiredString(value, 'code', 'Permisos del usuario'),
-    })),
-  }
+  return { isAdministrator: data.some(r => r.role === 'admin'), profileId: identity.user.id,
+    roles: data.map(r => ({ facilityId: '', code: r.role })), permissions: [], laboratory: laboratory.error ? undefined : laboratory.data as LaboratoryAccess }
 }
 
-export async function readPendingAppointmentRequests(facilityId: string): Promise<AppointmentRequest[]> {
-  if (!supabase) throw new Error('Supabase no está configurado. Revisa las variables de entorno.')
-  const { data, error } = await supabase.rpc('receptionist_pending_appointment_requests', {
-    p_facility: facilityId,
-  })
-  if (error) throw error
-  return parseRows(data, 'Solicitudes de atención', (row) => {
-    return {
-      id: requiredString(row, 'id', 'Solicitudes de atención'),
-      patientId: requiredString(row, 'patient_id', 'Solicitudes de atención'),
-      patientName: requiredString(row, 'patient_name', 'Solicitudes de atención'),
-      recordNumber: optionalString(row, 'record_number', 'Solicitudes de atención'),
-      facilityId: requiredString(row, 'facility_id', 'Solicitudes de atención'),
-      specialtyId: requiredString(row, 'specialty_id', 'Solicitudes de atención'),
-      specialtyName: requiredString(row, 'specialty_name', 'Solicitudes de atención'),
-      reason: requiredString(row, 'reason', 'Solicitudes de atención'),
-      preferredDate: requiredString(row, 'preferred_date', 'Solicitudes de atención'),
-      preferredStart: optionalString(row, 'preferred_start', 'Solicitudes de atención'),
-      preferredEnd: optionalString(row, 'preferred_end', 'Solicitudes de atención'),
-      rowVersion: requiredNumber(row, 'row_version', 'Solicitudes de atención'),
-    }
-  })
+export async function readPendingAppointmentRequests(_facilityId: string): Promise<AppointmentRequest[]> {
+  throw new Error('La conexi?n Auth de Hospital Moviles est? configurada. Falta verificar su esquema y conectar este m?dulo de datos.')
 }
 
-export async function readDoctorAppointments(facilityId: string, from: string, to: string): Promise<DoctorAppointment[]> {
-  if (!supabase) throw new Error('Supabase no está configurado. Revisa las variables de entorno.')
-  const { data, error } = await supabase.rpc('doctor_workspace', {
-    p_facility: facilityId,
-    p_from: from,
-    p_to: to,
-  })
-  if (error) throw error
-  if (!isRecord(data)) throw new Error('Agenda médica: respuesta con formato inválido.')
-  return parseRows(data.appointments, 'Agenda médica', (row) => ({
-    id: requiredString(row, 'id', 'Agenda médica'),
-    patientId: requiredString(row, 'patient_id', 'Agenda médica'),
-    patientName: requiredString(row, 'patient_name', 'Agenda médica'),
-    recordNumber: requiredString(row, 'record_number', 'Agenda médica'),
-    phone: optionalString(row, 'phone', 'Agenda médica'),
-    period: requiredString(row, 'period', 'Agenda médica'),
-    status: requiredString(row, 'status', 'Agenda médica'),
-    encounterId: optionalString(row, 'encounter_id', 'Agenda médica'),
-  }))
+export async function readDoctorAppointments(_facilityId: string, _from: string, _to: string): Promise<DoctorAppointment[]> {
+  throw new Error('La conexi?n Auth de Hospital Moviles est? configurada. Falta verificar su esquema y conectar este m?dulo de datos.')
 }
 
-export async function readDoctorAvailability(facilityId: string, physicianId: string, date: string): Promise<AppointmentTimeBlock[]> {
-  if (!supabase) throw new Error('Supabase no está configurado. Revisa las variables de entorno.')
-  const start = new Date(`${date}T00:00:00`)
-  if (Number.isNaN(start.getTime())) throw new Error('La fecha seleccionada para consultar disponibilidad no es válida.')
-  const end = new Date(start)
-  end.setDate(end.getDate() + 1)
-  const { data, error } = await supabase.rpc('receptionist_doctor_availability', {
-    p_facility: facilityId,
-    p_physician: physicianId,
-    p_from: start.toISOString(),
-    p_to: end.toISOString(),
-  })
-  if (error) throw error
-  return parseRows(data, 'Disponibilidad médica', (row) => ({
-    period: requiredString(row, 'period', 'Disponibilidad médica'),
-    status: requiredString(row, 'status', 'Disponibilidad médica'),
-  })).filter((block) => block.status !== 'cancelled')
+export async function readDoctorAvailability(_facilityId: string, _physicianId: string, _date: string): Promise<AppointmentTimeBlock[]> {
+  throw new Error('La conexi?n Auth de Hospital Moviles est? configurada. Falta verificar su esquema y conectar este m?dulo de datos.')
 }
 
-export async function scheduleAppointmentRequest(input: {
+export async function scheduleAppointmentRequest(_input: {
   requestId: string
   departmentId: string
   physicianId: string
@@ -266,128 +167,34 @@ export async function scheduleAppointmentRequest(input: {
   expectedVersion: number
   requestKey: string
 }): Promise<void> {
-  if (!supabase) throw new Error('Supabase no está configurado. Revisa las variables de entorno.')
-  const { data, error } = await supabase.rpc('schedule_appointment_request', {
-    p_id: input.requestId,
-    p_department: input.departmentId,
-    p_physician: input.physicianId,
-    p_starts_at: input.startsAt,
-    p_ends_at: input.endsAt,
-    p_room: null,
-    p_expected_version: input.expectedVersion,
-    p_request_key: input.requestKey,
-  })
-  if (error) throw error
-  if (!isRecord(data) || typeof data.appointment_id !== 'string') {
-    throw new Error('La programación no devolvió un identificador de cita válido.')
-  }
+  throw new Error('La conexi?n Auth de Hospital Moviles est? configurada. Falta verificar su esquema y conectar este m?dulo de datos.')
 }
 
 export async function searchManagedUsers(
-  facilityId: string,
-  query: string,
-  after: string | null = null,
+  _facilityId: string,
+  _query: string,
+  _after: string | null = null,
 ): Promise<{ users: ManagedUser[]; after: string | null }> {
-  if (!supabase) throw new Error('Supabase no está configurado. Revisa las variables de entorno.')
-  const { data, error } = await supabase.rpc('search_users', {
-    p_facility: facilityId,
-    p_filters: query.trim() ? { query: query.trim() } : {},
-    p_limit: 50,
-    p_after: after,
-  })
-  if (error) throw error
-  if (!isRecord(data) || !Array.isArray(data.data)) {
-    throw new Error('Directorio de usuarios: respuesta con formato inválido.')
-  }
-  const users = parseRows(data.data, 'Directorio de usuarios', (row) => ({
-    id: requiredString(row, 'id', 'Directorio de usuarios'),
-    email: optionalString(row, 'email', 'Directorio de usuarios') ?? '',
-    givenNames: optionalString(row, 'given_names', 'Directorio de usuarios') ?? '',
-    familyNames: optionalString(row, 'family_names', 'Directorio de usuarios') ?? '',
-    status: requiredString(row, 'status', 'Directorio de usuarios'),
-    roles: parseRows(row.roles, 'Roles del usuario', (role) => ({
-      id: requiredString(role, 'id', 'Roles del usuario'),
-      code: requiredString(role, 'code', 'Roles del usuario'),
-      name: requiredString(role, 'name', 'Roles del usuario'),
-    })),
-  }))
-  return {
-    users,
-    after: typeof data.after === 'string' ? data.after : null,
-  }
+  throw new Error('La conexi?n Auth de Hospital Moviles est? configurada. Falta verificar su esquema y conectar este m?dulo de datos.')
 }
 
-export async function readSystemRoles(facilityId: string): Promise<SystemRole[]> {
-  if (!supabase) throw new Error('Supabase no está configurado. Revisa las variables de entorno.')
-  const { data, error } = await supabase.rpc('access_roles', { p_facility: facilityId })
-  if (error) throw error
-  return parseRows(data, 'Roles del sistema', (row) => ({
-    id: requiredString(row, 'id', 'Roles del sistema'),
-    code: requiredString(row, 'code', 'Roles del sistema'),
-    name: requiredString(row, 'name', 'Roles del sistema'),
-  }))
+export async function readSystemRoles(_facilityId: string): Promise<SystemRole[]> {
+  throw new Error('La conexi?n Auth de Hospital Moviles est? configurada. Falta verificar su esquema y conectar este m?dulo de datos.')
 }
 
-export async function setUserRoles(profileId: string, facilityId: string, roleIds: string[]): Promise<void> {
-  if (!supabase) throw new Error('Supabase no está configurado. Revisa las variables de entorno.')
-  const { error } = await supabase.rpc('set_user_roles', {
-    p_profile: profileId,
-    p_facility: facilityId,
-    p_roles: roleIds,
-  })
-  if (error) throw error
+export async function setUserRoles(_profileId: string, _facilityId: string, _roleIds: string[]): Promise<void> {
+  throw new Error('La conexi?n Auth de Hospital Moviles est? configurada. Falta verificar su esquema y conectar este m?dulo de datos.')
 }
 
-export async function readPatientChart(patientId: string, isDoctor: boolean): Promise<PatientChart> {
-  if (!supabase) throw new Error('Supabase no está configurado. Revisa las variables de entorno.')
-  const { data, error } = isDoctor
-    ? await supabase.rpc('doctor_chart', {
-      p_patient: patientId,
-      p_from: null,
-      p_to: null,
-      p_query: '',
-    })
-    : await supabase.rpc('patient_chart', { p_patient: patientId })
-  if (error) throw error
-  if (!isRecord(data) || !isRecord(data.patient)) {
-    throw new Error('Expediente clínico: respuesta con formato inválido.')
-  }
-  return data
+export async function readPatientChart(_patientId: string, _isDoctor: boolean): Promise<PatientChart> {
+  throw new Error('La conexi?n Auth de Hospital Moviles est? configurada. Falta verificar su esquema y conectar este m?dulo de datos.')
 }
 
 export async function readPrescriptionCatalogs(): Promise<PrescriptionCatalogs> {
-  const [medicationRows, unitRows, routeRows] = await Promise.all([
-    readPublicView('catalog_medications'),
-    readPublicView('catalog_units'),
-    readPublicView('catalog_administration_routes'),
-  ])
-  return {
-    medications: parseRows(medicationRows, 'Medicamentos', (row) => {
-      if (typeof row.active !== 'boolean') throw new Error('Medicamentos: campo "active" inválido.')
-      const strength = row.strength
-      if (strength !== null && strength !== undefined && typeof strength !== 'string'
-        && (typeof strength !== 'number' || !Number.isFinite(strength))) {
-        throw new Error('Medicamentos: campo "strength" inválido.')
-      }
-      return {
-        id: requiredString(row, 'id', 'Medicamentos'),
-        name: requiredString(row, 'generic_name', 'Medicamentos'),
-        strength: strength === null || strength === undefined ? null : String(strength),
-        active: row.active,
-      }
-    }).filter((medication) => medication.active),
-    units: parseRows(unitRows, 'Unidades', (row) => ({
-      id: requiredString(row, 'id', 'Unidades'),
-      name: requiredString(row, 'name', 'Unidades'),
-    })),
-    routes: parseRows(routeRows, 'Vías de administración', (row) => ({
-      id: requiredString(row, 'id', 'Vías de administración'),
-      name: requiredString(row, 'name', 'Vías de administración'),
-    })),
-  }
+  throw new Error('La conexi?n Auth de Hospital Moviles est? configurada. Falta verificar su esquema y conectar este m?dulo de datos.')
 }
 
-export async function issuePrescription(input: {
+export async function issuePrescription(_input: {
   encounterId: string
   medicationId: string
   dose: number
@@ -400,62 +207,23 @@ export async function issuePrescription(input: {
   quantity: number | null
   requestKey: string
 }): Promise<void> {
-  if (!supabase) throw new Error('Supabase no está configurado. Revisa las variables de entorno.')
-  const { data, error } = await supabase.rpc('mobile_issue_prescription', {
-    p_encounter: input.encounterId,
-    p_request_key: input.requestKey,
-    p_items: [{
-      medication_id: input.medicationId,
-      dose: input.dose,
-      dose_unit_id: input.doseUnitId,
-      route_id: input.routeId,
-      interval_hours: input.intervalHours,
-      instructions: input.instructions,
-      starts_on: input.startsOn,
-      ends_on: input.endsOn,
-      quantity: input.quantity,
-    }],
-  })
-  if (error) throw error
-  if (!isRecord(data) || typeof data.id !== 'string') {
-    throw new Error('La receta no devolvió un identificador válido.')
-  }
+  throw new Error('La conexi?n Auth de Hospital Moviles est? configurada. Falta verificar su esquema y conectar este m?dulo de datos.')
 }
 
 export async function readLaboratoryTests(): Promise<LaboratoryTest[]> {
-  const rows = await readPublicView('catalog_test_definitions')
-  return parseRows(rows, 'Catálogo de estudios', (row) => {
-    if (typeof row.active !== 'boolean') throw new Error('Catálogo de estudios: campo "active" inválido.')
-    return {
-      id: requiredString(row, 'id', 'Catálogo de estudios'),
-      name: requiredString(row, 'name', 'Catálogo de estudios'),
-      kind: requiredString(row, 'kind', 'Catálogo de estudios'),
-      active: row.active,
-    }
-  }).filter((test) => test.active && test.kind === 'laboratory')
-    .map(({ id, name }) => ({ id, name }))
+  throw new Error('La conexi?n Auth de Hospital Moviles est? configurada. Falta verificar su esquema y conectar este m?dulo de datos.')
 }
 
-export async function requestLaboratoryStudy(input: {
+export async function requestLaboratoryStudy(_input: {
   encounterId: string
   testId: string
   instructions: string
   requestKey: string
 }): Promise<void> {
-  if (!supabase) throw new Error('Supabase no está configurado. Revisa las variables de entorno.')
-  const { data, error } = await supabase.rpc('doctor_issue_lab_order', {
-    p_encounter: input.encounterId,
-    p_test: input.testId,
-    p_instructions: input.instructions.trim(),
-    p_request_key: input.requestKey,
-  })
-  if (error) throw error
-  if (!isRecord(data) || typeof data.id !== 'string') {
-    throw new Error('La solicitud del estudio no devolvió un identificador válido.')
-  }
+  throw new Error('La conexi?n Auth de Hospital Moviles est? configurada. Falta verificar su esquema y conectar este m?dulo de datos.')
 }
 
-export async function createClinicalNote(input: {
+export async function createClinicalNote(_input: {
   encounterId: string
   subjective: string
   objective: string
@@ -463,108 +231,26 @@ export async function createClinicalNote(input: {
   plan: string
   requestKey: string
 }): Promise<void> {
-  if (!supabase) throw new Error('Supabase no está configurado. Revisa las variables de entorno.')
-  const noteValues = Object.fromEntries(
-    (['subjective', 'objective', 'assessment', 'plan'] as const)
-      .map((field) => [field, input[field].trim()])
-      .filter(([, value]) => value.length > 0),
-  )
-  if (Object.keys(noteValues).length === 0) throw new Error('Escribe al menos una sección de la nota clínica.')
-  const { data: note, error: createError } = await supabase.rpc('create_record', {
-    p_resource: 'clinical_notes',
-    p_values: {
-      encounter_id: input.encounterId,
-      kind: 'consultation',
-      ...noteValues,
-    },
-    p_request_key: input.requestKey,
-  })
-  if (createError) throw createError
-  if (!isRecord(note) || typeof note.id !== 'string' || typeof note.row_version !== 'number') {
-    throw new Error('La observación no devolvió los datos de versión esperados.')
-  }
-  const { error: signError } = await supabase.rpc('finalize_clinical_record', {
-    p_resource: 'clinical_notes',
-    p_id: note.id,
-    p_action: 'sign',
-    p_expected_version: note.row_version,
-  })
-  if (signError) throw signError
+  throw new Error('La conexi?n Auth de Hospital Moviles est? configurada. Falta verificar su esquema y conectar este m?dulo de datos.')
 }
 
-export async function rejectAppointmentRequest(requestId: string, expectedVersion: number, reason: string): Promise<void> {
-  if (!supabase) throw new Error('Supabase no está configurado. Revisa las variables de entorno.')
-  const { data, error } = await supabase.rpc('resolve_appointment_request', {
-    p_id: requestId,
-    p_status: 'rejected',
-    p_appointment: null,
-    p_reason: reason.trim() || null,
-    p_expected_version: expectedVersion,
-  })
-  if (error) throw error
-  if (!isRecord(data) || data.status !== 'rejected') {
-    throw new Error('La solicitud no confirmó el rechazo.')
-  }
+export async function rejectAppointmentRequest(_requestId: string, _expectedVersion: number, _reason: string): Promise<void> {
+  throw new Error('La conexi?n Auth de Hospital Moviles est? configurada. Falta verificar su esquema y conectar este m?dulo de datos.')
 }
 
-export async function readPatients(facilityId: string, query: string, after: string | null): Promise<PatientRecord[]> {
-  if (!supabase) throw new Error('Supabase no está configurado. Revisa las variables de entorno.')
-  const { data, error } = await supabase.rpc('list_patients', {
-    p_facility: facilityId,
-    p_query: query,
-    p_archived: false,
-    p_limit: 25,
-    p_after: after,
-  })
-  if (error) throw error
-  return parseRows(data, 'Directorio de pacientes', (row) => ({
-    id: requiredString(row, 'id', 'Directorio de pacientes'),
-    medicalRecordNumber: requiredString(row, 'medical_record_number', 'Directorio de pacientes'),
-    givenNames: requiredString(row, 'given_names', 'Directorio de pacientes'),
-    familyNames: requiredString(row, 'family_names', 'Directorio de pacientes'),
-    birthDate: optionalString(row, 'birth_date', 'Directorio de pacientes'),
-    administrativeSex: optionalString(row, 'administrative_sex', 'Directorio de pacientes'),
-    archivedAt: optionalString(row, 'archived_at', 'Directorio de pacientes'),
-  }))
+export async function readPatients(_facilityId: string, _query: string, _after: string | null): Promise<PatientRecord[]> {
+  throw new Error('La conexi?n Auth de Hospital Moviles est? configurada. Falta verificar su esquema y conectar este m?dulo de datos.')
 }
 
-export async function readAdmissionCatalogs(facilityId: string): Promise<{ departments: AdmissionDepartment[]; triageLevels: TriageLevel[] }> {
-  const [departmentRows, triageRows] = await Promise.all([
-    readPublicView('catalog_departments'),
-    readPublicView('catalog_triage_levels'),
-  ])
-  const departments = parseRows(departmentRows, 'Departamentos', (row) => {
-    if (typeof row.active !== 'boolean') throw new Error('Departamentos: campo "active" inválido.')
-    return {
-      id: requiredString(row, 'id', 'Departamentos'),
-      facilityId: requiredString(row, 'facility_id', 'Departamentos'),
-      name: requiredString(row, 'name', 'Departamentos'),
-      active: row.active,
-    }
-  }).filter((department) => department.active && department.facilityId === facilityId)
-  const triageLevels = parseRows(triageRows, 'Niveles de triage', (row) => ({
-    id: requiredString(row, 'id', 'Niveles de triage'),
-    code: requiredString(row, 'code', 'Niveles de triage'),
-    name: requiredString(row, 'name', 'Niveles de triage'),
-    priority: requiredNumber(row, 'priority', 'Niveles de triage'),
-  })).sort((left, right) => left.priority - right.priority)
-  return { departments, triageLevels }
+export async function readAdmissionCatalogs(_facilityId: string): Promise<{ departments: AdmissionDepartment[]; triageLevels: TriageLevel[] }> {
+  throw new Error('La conexi?n Auth de Hospital Moviles est? configurada. Falta verificar su esquema y conectar este m?dulo de datos.')
 }
 
-export async function readAdmissionPhysicians(facilityId: string, departmentId: string): Promise<AdmissionPhysician[]> {
-  if (!supabase) throw new Error('Supabase no está configurado. Revisa las variables de entorno.')
-  const { data, error } = await supabase.rpc('list_assignable_physicians', {
-    p_facility: facilityId,
-    p_department: departmentId,
-  })
-  if (error) throw error
-  return parseRows(data, 'Médicos asignados', (row) => ({
-    id: requiredString(row, 'id', 'Médicos asignados'),
-    name: requiredString(row, 'name', 'Médicos asignados'),
-  }))
+export async function readAdmissionPhysicians(_facilityId: string, _departmentId: string): Promise<AdmissionPhysician[]> {
+  throw new Error('La conexi?n Auth de Hospital Moviles est? configurada. Falta verificar su esquema y conectar este m?dulo de datos.')
 }
 
-export async function registerPatient(input: {
+export async function registerPatient(_input: {
   facilityId: string
   givenNames: string
   familyNames: string
@@ -572,22 +258,10 @@ export async function registerPatient(input: {
   sex: 'female' | 'male' | 'intersex' | 'unknown'
   requestKey: string
 }): Promise<void> {
-  if (!supabase) throw new Error('Supabase no está configurado. Revisa las variables de entorno.')
-  const { data, error } = await supabase.rpc('register_patient', {
-    p_facility: input.facilityId,
-    p_given_names: input.givenNames,
-    p_family_names: input.familyNames,
-    p_birth_date: input.birthDate,
-    p_sex: input.sex,
-    p_request_key: input.requestKey,
-  })
-  if (error) throw error
-  if (!isRecord(data) || typeof data.id !== 'string') {
-    throw new Error('El registro de paciente no devolvió un identificador válido.')
-  }
+  throw new Error('La conexi?n Auth de Hospital Moviles est? configurada. Falta verificar su esquema y conectar este m?dulo de datos.')
 }
 
-export async function registerPatientWithAppointmentRequest(input: {
+export async function registerPatientWithAppointmentRequest(_input: {
   facilityId: string
   givenNames: string
   familyNames: string
@@ -600,27 +274,10 @@ export async function registerPatientWithAppointmentRequest(input: {
   preferredEnd: string
   requestKey: string
 }): Promise<void> {
-  if (!supabase) throw new Error('Supabase no está configurado. Revisa las variables de entorno.')
-  const { data, error } = await supabase.rpc('register_patient_appointment_request', {
-    p_facility: input.facilityId,
-    p_given_names: input.givenNames,
-    p_family_names: input.familyNames,
-    p_birth_date: input.birthDate,
-    p_sex: input.sex,
-    p_specialty: input.specialtyId,
-    p_reason: input.reason,
-    p_preferred_date: input.preferredDate,
-    p_preferred_start: input.preferredStart,
-    p_preferred_end: input.preferredEnd,
-    p_request_key: input.requestKey,
-  })
-  if (error) throw error
-  if (!isRecord(data) || typeof data.patient_id !== 'string' || typeof data.request_id !== 'string' || data.status !== 'pending') {
-    throw new Error('El registro no confirmó la solicitud pendiente de asignación.')
-  }
+  throw new Error('La conexi?n Auth de Hospital Moviles est? configurada. Falta verificar su esquema y conectar este m?dulo de datos.')
 }
 
-export async function registerAdmission(input: {
+export async function registerAdmission(_input: {
   patientId: string
   departmentId: string
   physicianId: string
@@ -628,64 +285,13 @@ export async function registerAdmission(input: {
   triageLevelId: string
   requestKey: string
 }): Promise<void> {
-  if (!supabase) throw new Error('Supabase no está configurado. Revisa las variables de entorno.')
-  const { data, error } = await supabase.rpc('register_admission', {
-    p_patient: input.patientId,
-    p_department: input.departmentId,
-    p_physician: input.physicianId,
-    p_type: input.admissionType,
-    p_priority: input.triageLevelId,
-    p_request_key: input.requestKey,
-  })
-  if (error) throw error
-  if (!isRecord(data) || typeof data.id !== 'string') {
-    throw new Error('El registro de ingreso no devolvió un identificador válido.')
-  }
+  throw new Error('La conexi?n Auth de Hospital Moviles est? configurada. Falta verificar su esquema y conectar este m?dulo de datos.')
 }
 
-export async function readHospitalOverview(facilityId: string): Promise<HospitalOverview> {
-  if (!supabase) throw new Error('Supabase no está configurado. Revisa las variables de entorno.')
-  const { data, error } = await supabase.rpc('hospital_overview', { p_facility: facilityId })
-  if (error) throw error
-  if (!isRecord(data)) throw new Error('Resumen hospitalario: respuesta con formato inválido.')
-  const context = 'Resumen hospitalario'
-  return {
-    asOf: requiredString(data, 'as_of', context),
-    capacity: requiredNumber(data, 'capacity', context),
-    occupied: requiredNumber(data, 'occupied', context),
-    information: parseRows(data.information, 'Avisos institucionales', (row) => ({
-      id: requiredString(row, 'id', 'Avisos institucionales'),
-      category: requiredString(row, 'category', 'Avisos institucionales'),
-      title: requiredString(row, 'title', 'Avisos institucionales'),
-      body: requiredString(row, 'body', 'Avisos institucionales'),
-      publishedAt: requiredString(row, 'published_at', 'Avisos institucionales'),
-      expiresAt: optionalString(row, 'expires_at', 'Avisos institucionales'),
-    })),
-    onDuty: parseRows(data.on_duty, 'Personal de turno', (row) => ({
-      name: requiredString(row, 'name', 'Personal de turno'),
-      specialty: requiredString(row, 'specialty', 'Personal de turno'),
-      department: requiredString(row, 'department', 'Personal de turno'),
-      startsAt: requiredString(row, 'starts_at', 'Personal de turno'),
-      endsAt: requiredString(row, 'ends_at', 'Personal de turno'),
-    })),
-  }
+export async function readHospitalOverview(_facilityId: string): Promise<HospitalOverview> {
+  throw new Error('La conexi?n Auth de Hospital Moviles est? configurada. Falta verificar su esquema y conectar este m?dulo de datos.')
 }
 
-export async function readPublicView(viewName: string): Promise<Record<string, unknown>[]> {
-  if (!supabase) {
-    throw new Error('Supabase no está configurado. Revisa las variables de entorno.')
-  }
-
-  const { data, error } = await supabase.schema('public').from(viewName).select('*')
-  if (error) throw error
-  if (!Array.isArray(data)) {
-    throw new Error(`La vista pública "${viewName}" no devolvió una lista de registros.`)
-  }
-
-  return data.map((row: unknown) => {
-    if (!isRecord(row)) {
-      throw new Error(`La vista pública "${viewName}" devolvió un registro con formato inválido.`)
-    }
-    return row
-  })
+export async function readPublicView(_viewName: string): Promise<Record<string, unknown>[]> {
+  throw new Error('La conexi?n Auth de Hospital Moviles est? configurada. Falta verificar su esquema y conectar este m?dulo de datos.')
 }

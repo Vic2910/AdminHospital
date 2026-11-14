@@ -1,25 +1,30 @@
-# Hospital Universitario
+# Hospital Moviles
 
-Panel web desarrollado con React, TypeScript, Vite y Tailwind CSS.
+Panel web con React, TypeScript, Vite y Tailwind CSS. Conserva el dise?o y los colores existentes.
 
-## Desarrollo local
+## Configuraci?n
+
+El ?nico proyecto permitido es Hospital Moviles: `uvebpsbbwofthucghccc`.
 
 1. Instala dependencias con `npm install`.
-2. Copia `.env.example` a `.env.local`.
-3. Configura `VITE_SUPABASE_URL` y `VITE_SUPABASE_PUBLISHABLE_KEY` con los datos del proyecto Supabase.
-4. Inicia Vite con `npm run dev`.
+2. Copia `.env.example` a `.env.local` si el archivo todav?a no existe.
+3. Configura la clave Publishable del mismo proyecto en `VITE_SUPABASE_PUBLISHABLE_KEY`.
+4. Usa `VITE_SUPABASE_URL=https://uvebpsbbwofthucghccc.supabase.co`.
+5. Inicia el frontend con `npm.cmd run dev` en PowerShell.
 
-La aplicación inicia sesión y permite crear cuentas mediante Supabase Auth. Crear una cuenta no le asigna roles ni permisos; un administrador debe autorizarlos por institución. `src/lib/api.ts` centraliza lecturas de catálogos públicos y RPC. Están conectados el resumen general, el directorio de pacientes, el registro de pacientes e ingresos y la lista de laboratorio; los demás módulos todavía muestran datos de demostración. Las RPC usan la sesión autenticada y las autorizaciones definidas en la base de datos. No se debe exponer una clave `service_role` en el cliente.
+No uses la ruta /rest/v1/ como URL del cliente. El cliente normaliza esa ruta y rechaza hosts diferentes del proyecto configurado. La sesi?n usa un almacenamiento propio de Hospital Moviles para evitar reutilizar sesiones de otra integraci?n. No incluyas claves secretas ni contrase?as en el c?digo.
 
-## Esquema de la API
+## Estado de la integracion
 
-Las pantallas conectadas consultan `hospital_overview`, `list_patients`, `register_patient`, `register_admission`, `list_staff` y `laboratory_worklist`, que delegan en funciones privadas con autorización en la base de datos. Los catálogos de instituciones, departamentos y niveles de triage se leen desde vistas `public` con `security_invoker`.
+Hospital Moviles esta conectado y su esquema fue verificado. El acceso administrativo requiere el rol admin activo por UUID. El registro seguro de empleados utiliza la Edge Function manage-employees.
 
-El Data API no expone directamente el esquema `hospital`; las pantallas no necesitan acceso directo a sus tablas. Mantén ese esquema fuera de los esquemas expuestos por PostgREST y usa únicamente RPC/vistas con permisos revisados y políticas RLS adecuadas.
+Consulta [Personal hospitalario](docs/personal-hospitalario.md) para registro y seguridad.
 
-Los archivos `supabase/inspect_schema.sql`, `supabase/inspect_api_contract.sql` y `supabase/inspect_rpc_definitions.sql` contienen consultas de metadatos para revisar RLS, permisos, contratos e implementaciones de RPC. No leen filas clínicas.
+El modulo [Horarios y turnos](docs/horarios-y-turnos.md) incluye programacion semanal, jornadas nocturnas, consultas y consultorios. Los 20 consultorios CONS-01 a CONS-20 ya estan registrados. La propuesta SQL de horarios esta probada localmente y pendiente de aprobacion antes de modificar el esquema conectado; hasta entonces la escritura permanece bloqueada.
 
-## Validación
+Consulta el [plan de despliegue](docs/despliegue-horarios.md), la [verificacion del respaldo integral](docs/respaldo-integral-supabase.md) y la prueba final preparada en `tests/planning-acceptance.mjs`. El panel requiere habilitacion explicita mediante `VITE_STAFF_PLANNING_ENABLED=true`; su valor por omision es `false`. Las compilaciones de staging usan un proyecto distinto y generan `dist-staging/`.
 
-- `npm run build`
-- `npm run lint`
+## Validaci?n
+
+- `npm.cmd run build`
+- `npm.cmd run lint`

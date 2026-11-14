@@ -1,177 +1,65 @@
 import { useEffect, useState } from 'react'
-import { FacilityPicker } from '../components/FacilityPicker'
 import { Icon } from '../components/Icon'
-import { readHospitalOverview, type HospitalOverview } from '../lib/api'
-import { useFacilities } from '../lib/useFacilities'
+import { readDashboardCounts, type DashboardCounts } from '../lib/dashboard'
+import { bedDisplayState, readHospitalInventory, type HospitalInventory } from '../lib/hospitalization'
+import { loadAgenda, localDate, type ReceptionAppointment } from '../lib/reception'
+import type { Page, IconName } from '../types'
+import type { ReceptionTab } from './ReceptionPage'
+import './GeneralDashboard.css'
 
-interface OverviewResponse {
-  facilityId: string
-  overview: HospitalOverview | null
-  error: string
-}
+interface DashboardData { counts: DashboardCounts | null; inventory: HospitalInventory | null; agenda: ReceptionAppointment[] | null; errors: string[]; updatedAt: Date }
+const time = (date: string | Date) => new Date(date).toLocaleTimeString('es-SV', { timeZone: 'America/El_Salvador', hour: '2-digit', minute: '2-digit' })
+const statuses: Record<string, string> = { programada: 'Programada', confirmada: 'Confirmada', en_atencion: 'En atención', completada: 'Completada', cancelada: 'Cancelada', no_asistio: 'No asistió' }
 
-const pendingMetrics = [
-  { icon: 'bed' as const, label: 'Habitaciones VIP' },
-  { icon: 'bed' as const, label: 'Habitaciones semiprivadas' },
-  { icon: 'activity' as const, label: 'Ambulancia' },
-  { icon: 'calendar' as const, label: 'Citas del día' },
-]
-
-const pendingPanels = [
-  { icon: 'bed' as const, title: 'Infraestructura hospitalaria' },
-  { icon: 'patient' as const, title: 'Ingresos recientes de pacientes' },
-  { icon: 'calendar' as const, title: 'Citas de hoy' },
-]
-
-function initials(name: string): string {
-  return name.split(/\s+/).slice(0, 2).map((part) => part[0] ?? '').join('').toUpperCase()
-}
-
-function time(value: string): string {
-  return new Date(value).toLocaleTimeString('es-SV', { hour: '2-digit', minute: '2-digit' })
-}
-
-export function GeneralDashboard({ showUnconnected }: { showUnconnected: boolean }) {
-  const { facilities, loading: facilitiesLoading, error: facilitiesError } = useFacilities()
-  const [selectedFacilityId, setSelectedFacilityId] = useState('')
-  const [response, setResponse] = useState<OverviewResponse | null>(null)
-  const facilityId = facilities.find((facility) => facility.id === selectedFacilityId)?.id ?? facilities[0]?.id ?? ''
-  const currentResponse = response?.facilityId === facilityId ? response : null
-  const loading = Boolean(facilityId) && !currentResponse
-
+export function GeneralDashboard({ onNavigate, onOpenReception }: { onNavigate: (page: Page) => void; onOpenReception: (tab: ReceptionTab) => void }) {
+  const [data, setData] = useState<DashboardData | null>(null)
+  const [loading, setLoading] = useState(true); const [revision, setRevision] = useState(0)
+  const today = localDate()
   useEffect(() => {
-    if (!facilityId) return
     let active = true
-    readHospitalOverview(facilityId).then((overview) => {
-      if (active) setResponse({ facilityId, overview, error: '' })
-    }).catch((loadError: unknown) => {
-      if (active) setResponse({
-        facilityId,
-        overview: null,
-        error: loadError instanceof Error ? loadError.message : 'No se pudo cargar el resumen hospitalario.',
-      })
+    setLoading(true)
+    Promise.allSettled([readDashboardCounts(), readHospitalInventory(), loadAgenda(today)]).then(([counts, inventory, agenda]) => {
+      if (!active) return
+      const errors: string[] = []
+      if (counts.status === 'rejected') errors.push('indicadores de recepción y personal')
+      else errors.push(...counts.value.errors)
+      if (inventory.status === 'rejected') errors.push('ocupación de camas')
+      if (agenda.status === 'rejected') errors.push('agenda del día')
+      setData({ counts: counts.status === 'fulfilled' ? counts.value : null, inventory: inventory.status === 'fulfilled' ? inventory.value : null, agenda: agenda.status === 'fulfilled' ? agenda.value : null, errors, updatedAt: new Date() })
+      setLoading(false)
     })
-    return () => {
-      active = false
-    }
-  }, [facilityId])
-
-  const overview = currentResponse?.overview
-  const occupancy = overview && overview.capacity > 0
-    ? Math.min(100, Math.round((overview.occupied / overview.capacity) * 100))
-    : 0
-  const availableBeds = overview ? Math.max(0, overview.capacity - overview.occupied) : 0
-  const metrics = overview ? [
-    { icon: 'bed' as const, label: 'Capacidad de camas', value: overview.capacity, detail: 'Camas activas', tone: 'text-[#870b30]', bar: 'bg-[#870b30]', percent: 100 },
-    { icon: 'patient' as const, label: 'Camas ocupadas', value: overview.occupied, detail: `${occupancy}% de ocupación`, tone: 'text-[#870b30]', bar: 'bg-[#870b30]', percent: occupancy },
-    { icon: 'check' as const, label: 'Camas disponibles', value: availableBeds, detail: 'Disponibles para asignación', tone: 'text-emerald-700', bar: 'bg-emerald-600', percent: overview.capacity > 0 ? Math.round((availableBeds / overview.capacity) * 100) : 0 },
-    { icon: 'activity' as const, label: 'Personal de turno', value: overview.onDuty.length, detail: 'Turnos activos confirmados', tone: 'text-[#870b30]', bar: 'bg-[#870b30]', percent: overview.onDuty.length > 0 ? 100 : 0 },
-  ] : []
-
-  return (
-    <>
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <FacilityPicker facilities={facilities} loading={facilitiesLoading} onChange={setSelectedFacilityId} selectedId={facilityId} />
-      </div>
-      {facilitiesError && <p className="mb-4 rounded-lg bg-rose-50 px-3 py-2 text-xs text-rose-800" role="alert">{facilitiesError}</p>}
-      {!facilitiesLoading && !facilitiesError && facilities.length === 0 && <p className="mb-4 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800" role="status">No hay instituciones activas disponibles para esta cuenta.</p>}
-      {loading && <p className="mb-4 rounded-lg bg-white p-4 text-xs text-slate-500" role="status">Cargando resumen hospitalario...</p>}
-      {currentResponse?.error && <p className="mb-4 rounded-lg bg-rose-50 px-3 py-2 text-xs text-rose-800" role="alert">{currentResponse.error}</p>}
-      {overview && (
-        <div className="space-y-3">
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            {metrics.map((metric) => (
-              <article className="rounded-xl border border-slate-100 bg-white p-3 shadow-[0_2px_10px_rgba(15,23,42,0.025)]" key={metric.label}>
-                <div className="flex items-center gap-2">
-                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-rose-50 text-[#870b30]"><Icon name={metric.icon} size={14} /></span>
-                  <h2 className="text-[11px] font-medium text-slate-700">{metric.label}</h2>
-                </div>
-                <p className={`mt-2 text-2xl font-semibold leading-none ${metric.tone}`}>{metric.value}</p>
-                <p className="mt-1.5 text-[10px] text-slate-400">{metric.detail}</p>
-                <div className="mt-2 h-1 overflow-hidden rounded-full bg-rose-100">
-                  <div className={`h-full rounded-full ${metric.bar}`} style={{ width: `${metric.percent}%` }} />
-                </div>
-              </article>
-            ))}
-            {showUnconnected && pendingMetrics.map((metric) => (
-              <article className="rounded-xl border border-dashed border-slate-200 bg-white p-3" key={metric.label}>
-                <div className="flex items-center gap-2">
-                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-400"><Icon name={metric.icon} size={14} /></span>
-                  <h2 className="text-[11px] font-medium text-slate-600">{metric.label}</h2>
-                </div>
-                <p className="mt-2 text-sm font-medium text-slate-400">Sin datos</p>
-                <p className="mt-1.5 text-[10px] text-slate-400">Pendiente de integrar al dashboard</p>
-              </article>
-            ))}
-          </div>
-
-          <div className="grid grid-cols-1 gap-3 xl:grid-cols-3">
-            <section className="rounded-xl border border-slate-100 bg-white p-4 shadow-[0_2px_10px_rgba(15,23,42,0.025)]">
-              <h2 className="text-xs font-semibold text-slate-800">Ocupación de camas</h2>
-              <div className="my-4 flex justify-center">
-                <div className="relative flex h-28 w-28 items-center justify-center rounded-full" style={{ background: `conic-gradient(#870b30 0% ${occupancy}%, #f8e5eb ${occupancy}% 100%)` }}>
-                  <div className="flex h-[84px] w-[84px] flex-col items-center justify-center rounded-full bg-white">
-                    <span className="text-xl font-semibold text-[#870b30]">{occupancy}%</span>
-                    <span className="text-[10px] text-slate-400">{overview.occupied} ocupadas</span>
-                  </div>
-                </div>
-              </div>
-              <div className="space-y-2 border-t border-slate-100 pt-3 text-[11px]">
-                <p className="flex justify-between text-slate-500"><span>Capacidad total</span><strong className="text-[#870b30]">{overview.capacity}</strong></p>
-                <p className="flex justify-between text-slate-500"><span>Camas disponibles</span><strong className="text-[#870b30]">{availableBeds}</strong></p>
-                <p className="flex justify-between text-slate-500"><span>Actualizado</span><span>{new Date(overview.asOf).toLocaleTimeString('es-SV', { hour: '2-digit', minute: '2-digit' })}</span></p>
-              </div>
-            </section>
-
-            <section className="rounded-xl border border-slate-100 bg-white p-4 shadow-[0_2px_10px_rgba(15,23,42,0.025)]">
-              <div className="mb-3 flex items-center justify-between gap-2">
-                <h2 className="text-xs font-semibold text-slate-800">Médicos de turno</h2>
-                <span className="rounded-full bg-rose-50 px-2 py-1 text-[10px] font-medium text-[#870b30]">{overview.onDuty.length} activos</span>
-              </div>
-              {overview.onDuty.length > 0
-                ? <div className="max-h-64 space-y-2 overflow-y-auto">{overview.onDuty.map((staff) => (
-                  <article className="flex items-center gap-2.5 rounded-lg bg-slate-50 p-2.5" key={`${staff.name}-${staff.department}-${staff.startsAt}`}>
-                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-rose-100 text-[9px] font-semibold text-[#870b30]">{initials(staff.name)}</span>
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-[11px] font-semibold text-slate-700">{staff.name}</p>
-                      <p className="mt-0.5 truncate text-[10px] text-slate-400">{staff.specialty} · {staff.department}</p>
-                    </div>
-                    <span className="whitespace-nowrap rounded-full bg-emerald-100 px-2 py-1 text-[9px] text-emerald-700">{time(staff.startsAt)}–{time(staff.endsAt)}</span>
-                  </article>
-                ))}</div>
-                : <p className="rounded-lg bg-slate-50 p-3 text-[11px] text-slate-400">No hay personal de turno para mostrar.</p>}
-            </section>
-
-            <section className="rounded-xl border border-slate-100 bg-white p-4 shadow-[0_2px_10px_rgba(15,23,42,0.025)]">
-              <div className="mb-3 flex items-center justify-between gap-2">
-                <h2 className="text-xs font-semibold text-slate-800">Avisos institucionales</h2>
-                <span className="rounded-full bg-rose-50 px-2 py-1 text-[10px] font-medium text-[#870b30]">{overview.information.length}</span>
-              </div>
-              {overview.information.length > 0
-                ? <div className="max-h-64 space-y-2 overflow-y-auto">{overview.information.map((notice) => (
-                  <article className="rounded-lg bg-slate-50 p-3" key={notice.id}>
-                    <p className="text-[9px] font-semibold uppercase tracking-wide text-[#870b30]">{notice.category}</p>
-                    <h3 className="mt-1 text-[11px] font-semibold text-slate-700">{notice.title}</h3>
-                    <p className="mt-1 whitespace-pre-wrap text-[10px] leading-relaxed text-slate-500">{notice.body}</p>
-                  </article>
-                ))}</div>
-                : <p className="rounded-lg bg-slate-50 p-3 text-[11px] text-slate-400">No hay avisos vigentes.</p>}
-            </section>
-
-            {showUnconnected && pendingPanels.map((panel) => (
-              <section className="rounded-xl border border-dashed border-slate-200 bg-white p-4" key={panel.title}>
-                <div className="mb-3 flex items-center gap-2">
-                  <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-slate-100 text-slate-400"><Icon name={panel.icon} size={14} /></span>
-                  <h2 className="text-xs font-semibold text-slate-700">{panel.title}</h2>
-                </div>
-                <p className="rounded-lg bg-slate-50 p-3 text-[11px] leading-relaxed text-slate-400">
-                  Sin datos en el resumen. Este módulo está pendiente de integración al dashboard.
-                </p>
-              </section>
-            ))}
-          </div>
-        </div>
-      )}
-    </>
-  )
+    return () => { active = false }
+  }, [revision, today])
+  const counts = data?.counts
+  const inventory = data?.inventory
+  const bedCount = (state: string) => inventory ? inventory.beds.filter(b => bedDisplayState(b, inventory.rooms.find(r => r.id === b.room_id)) === state).length : null
+  const available = bedCount('disponible'); const occupied = bedCount('ocupada'); const cleaning = bedCount('limpieza')
+  const totalBeds = inventory?.beds.length ?? 0
+  const occupancy = inventory && totalBeds ? Math.round(((occupied ?? 0) / totalBeds) * 100) : 0
+  const metrics: { label: string; value: number | null | undefined; detail: string; icon: IconName; tone: string; action: () => void }[] = [
+    { label: 'Solicitudes pendientes', value: counts?.pending, detail: 'Pacientes que esperan revisión', icon: 'file', tone: 'wine', action: () => onOpenReception('Solicitudes de atención') },
+    { label: 'Ingresos por gestionar', value: counts?.admissions, detail: 'Solicitudes del médico pendientes', icon: 'patient', tone: 'amber', action: () => onOpenReception('Hospitalización') },
+    { label: 'Camas disponibles', value: available, detail: 'Listas para recibir pacientes', icon: 'bed', tone: 'green', action: () => onNavigate('Habitaciones y Camas') },
+    { label: 'Altas pendientes de salida', value: counts?.discharges, detail: 'Con autorización médica registrada', icon: 'check', tone: 'blue', action: () => onOpenReception('Hospitalización') },
+  ]
+  const actions: { title: string; detail: string; icon: IconName; action: () => void }[] = [
+    { title: 'Gestionar recepción', detail: 'Solicitudes, pacientes y citas', icon: 'patient', action: () => onOpenReception('Solicitudes de atención') },
+    { title: 'Personal hospitalario', detail: 'Doctores y recepcionistas', icon: 'users', action: () => onNavigate('Personal hospitalario') },
+    { title: 'Horarios y consultorios', detail: 'Jornadas y asignaciones médicas', icon: 'clock', action: () => onNavigate('Horarios y turnos') },
+    { title: 'Hospitalización', detail: 'Ingresos, camas y salidas', icon: 'bed', action: () => onOpenReception('Hospitalización') },
+  ]
+  const appointments = data?.agenda ?? []
+  return <div className="admin-dashboard">
+    <section className="dashboard-welcome"><div><span className="dashboard-eyebrow">HOSPITAL MÓVILES · ADMINISTRACIÓN</span><h2>Bienvenido a tu panel.</h2><p>Una vista clara de lo que necesita atención y de la operación del hospital.</p><div className="dashboard-date"><Icon name="calendar" size={15} />{new Date(`${today}T12:00:00-06:00`).toLocaleDateString('es-SV', { timeZone: 'America/El_Salvador', weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</div></div><div className="dashboard-welcome-art" aria-hidden="true"><span /><span /><Icon name="plus" size={54} /></div></section>
+    <div className="dashboard-section-heading"><div><h3>El hospital de un vistazo</h3><p>{loading ? 'Consultando la información…' : `Última consulta a las ${time(data!.updatedAt)}`}</p></div><button className="dashboard-secondary" disabled={loading} onClick={() => setRevision(v => v + 1)}><Icon name="clock" size={15} />{loading ? 'Actualizando…' : 'Actualizar'}</button></div>
+    {!!data?.errors.length && <div className="dashboard-error" role="alert">No se pudieron consultar: {data.errors.join(', ')}. Los indicadores sin datos aparecen con «—». Usa Actualizar para reintentar.</div>}
+    {loading && <p className="sr-only" role="status">Actualizando los indicadores del hospital.</p>}
+    <div className="dashboard-metrics" aria-busy={loading}>{metrics.map(m => <button key={m.label} onClick={m.action} className={`dashboard-metric ${m.tone}`}><div className="dashboard-metric-top"><span className="dashboard-icon"><Icon name={m.icon} size={22} /></span><Icon name="arrowRight" size={16} /></div><span className="dashboard-metric-label">{m.label}</span><strong>{loading && !data ? '—' : m.value ?? '—'}</strong><small>{m.detail}</small></button>)}</div>
+    <section className="dashboard-quick-section"><div className="dashboard-section-heading"><div><h3>¿Qué necesitas hacer?</h3><p>Entra directamente al área que vas a gestionar.</p></div></div><div className="dashboard-quick-actions">{actions.map(a => <button key={a.title} onClick={a.action}><span className="dashboard-icon"><Icon name={a.icon} size={23} /></span><div><strong>{a.title}</strong><small>{a.detail}</small></div><Icon name="chevron" size={17} /></button>)}</div></section>
+    <div className="dashboard-detail-grid">
+      <section className="dashboard-panel"><div className="dashboard-section-heading"><div><h3>Estado de las camas</h3><p>Inventario registrado del hospital</p></div><Icon name="bed" size={21} /></div>{!inventory ? <div className="dashboard-empty"><Icon name="bed" size={30} /><p>{loading ? 'Consultando ocupación…' : 'No se pudo consultar el inventario.'}</p></div> : <><div className="dashboard-occupancy"><div className="dashboard-donut" role="img" aria-label={`${occupancy}% de camas registradas ocupadas`} style={{ background: `conic-gradient(#870b30 ${occupancy}%, #f0e7eb 0)` }}><div><strong>{occupancy}%</strong><small>ocupación</small></div></div><div><strong>{occupied}<span> / {totalBeds}</span></strong><p>camas registradas ocupadas</p><small>{inventory.rooms.length} habitaciones en el inventario</small></div></div><div className="dashboard-bed-legend">{[['Disponibles', available, 'green'], ['Ocupadas', occupied, 'wine'], ['En limpieza', cleaning, 'amber'], ['Mantenimiento', bedCount('mantenimiento'), 'amber'], ['Fuera de servicio', bedCount('fuera_servicio'), 'gray']].map(([label, value, tone]) => <div key={label}><span><i className={String(tone)} />{label}</span><strong>{value}</strong></div>)}</div>{!totalBeds && <p className="dashboard-note">Registra las habitaciones y camas reales para consultar su ocupación.</p>}</>}<button className="dashboard-text-button" onClick={() => onNavigate('Habitaciones y Camas')}>Ver habitaciones y camas <Icon name="arrowRight" size={16} /></button></section>
+      <section className="dashboard-panel"><div className="dashboard-section-heading"><div><h3>Agenda de hoy</h3><p>Horarios de El Salvador</p></div><span className="dashboard-pill">{data?.agenda ? `${appointments.length}${appointments.length === 200 ? '+' : ''} citas` : '—'}</span></div>{!data?.agenda ? <div className="dashboard-empty"><Icon name="calendar" size={30} /><p>{loading ? 'Consultando la agenda…' : 'No se pudo consultar la agenda.'}</p></div> : appointments.length === 0 ? <div className="dashboard-empty"><Icon name="calendar" size={32} /><h4>Hoy no hay citas registradas</h4><p>Las citas programadas desde Recepción aparecerán aquí.</p></div> : <div className="dashboard-agenda">{appointments.slice(0, 5).map(a => <div key={a.id}><time>{time(a.starts_at)}</time><div><strong>{a.patient_name || 'Paciente registrado'}</strong><small>{a.doctor_name || 'Médico asignado'} · Consultorio {a.room_code || 'asignado'}</small></div><span className={`dashboard-agenda-state ${a.status === 'cancelada' ? 'cancelled' : ''}`}>{statuses[a.status] ?? a.status}</span></div>)}</div>}<button className="dashboard-text-button" onClick={() => onOpenReception('Agenda de citas')}>Consultar agenda completa <Icon name="arrowRight" size={16} /></button></section>
+    </div>
+    <section className="dashboard-follow-up"><span className="dashboard-icon"><Icon name="activity" size={22} /></span><div><strong>Seguimiento de la operación</strong><p><b>{counts?.reviewing ?? '—'}</b> solicitudes en revisión <span>·</span> <b>{counts?.staff ?? '—'}</b> empleados activos registrados</p></div><button className="dashboard-secondary" onClick={() => onOpenReception('Solicitudes de atención')}>Ir a Recepción <Icon name="arrowRight" size={16} /></button></section>
+  </div>
 }

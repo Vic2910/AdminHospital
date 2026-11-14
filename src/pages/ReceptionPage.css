@@ -1,0 +1,156 @@
+.reception { --wine: #800b2c; --wine-soft: #fbf3f5; }
+.reception button { transition: background-color .18s, border-color .18s, box-shadow .18s; }
+.reception button:focus-visible, .reception input:focus-visible, .reception select:focus-visible, .reception textarea:focus-visible { outline: 3px solid #ba7188; outline-offset: 3px; }
+.reception button:disabled { cursor: not-allowed; }
+.reception button.bg-\[\#800b2c\] { display: inline-flex; align-items: center; justify-content: center; gap: 10px; min-height: 46px; border-radius: 10px; box-shadow: 0 3px 8px #800b2c12; }
+.reception button.bg-\[\#800b2c\]:hover:not(:disabled) { background: #650821; }
+.reception-intro { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 25px 28px; background: linear-gradient(110deg, #fff, #fbf0f3); border: 1px solid #eadce1; border-radius: 18px; }
+.reception-eyebrow { display: block; color: #975a6d; font-size: 10px; font-weight: 750; letter-spacing: .12em; }
+.reception-intro h2 { margin: 6px 0; font-size: clamp(19px, 2vw, 24px); font-weight: 700; color: #5f1028; letter-spacing: -.025em; }
+.reception-intro p, .reception-section-heading p { color: #6b7280; font-size: 13px; line-height: 1.65; }
+.reception-intro-icon { display: grid; place-items: center; flex-shrink: 0; width: 64px; height: 64px; border: 1px solid #eadce1; border-radius: 20px; background: white; color: var(--wine); transform: rotate(-5deg); }
+.reception-tabs { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); padding: 6px; gap: 6px; border: 1px solid #e5e7eb; border-radius: 15px; background: white; }
+.reception-tabs button { display: flex; align-items: center; gap: 12px; padding: 15px 18px; text-align: left; border-radius: 10px; color: #64748b; }
+.reception-tabs button strong { display: block; font-size: 13px; font-weight: 650; }
+.reception-tabs button small { display: block; margin-top: 3px; font-size: 11px; color: #87909e; }
+.reception-tabs button.is-active { background: var(--wine); color: white; box-shadow: 0 3px 8px #800b2c22; }
+.reception-tabs button.is-active small { color: #f2ced9; }
+.reception-tabs button:hover:not(.is-active) { background: var(--wine-soft); color: var(--wine); }
+.reception-section-heading { display: flex; align-items: center; justify-content: space-between; gap: 15px; margin-bottom: 22px; }
+.reception-section-heading h3 { font-size: 18px; font-weight: 700; color: #252e3d; letter-spacing: -.02em; margin-bottom: 5px; }
+.reception-count { white-space: nowrap; align-self: center; background: var(--wine-soft); border: 1px solid #ecdce2; border-radius: 20px; padding: 6px 12px; font-size: 11px; color: var(--wine); font-weight: 600; }
+.reception-request { background: white; }
+.reception-request:hover { box-shadow: 0 5px 18px #800b2c0c; background: #fffdfd; }
+.reception-request.request-pendiente { background: #fffaf0; border-color: #ebd9b0; }
+.request-pendiente .reception-state-label { background: #f9e9be; color: #8a631d; }
+.reception-request.request-en_revision { background: #f3f4f6; border-color: #d9dde4; }
+.request-en_revision .reception-state-label { background: #e4e7ed; color: #5d6574; }
+.reception-request.request-agendada { background: #f0f9f3; border-color: #c5e4cf; }
+.request-agendada .reception-state-label { background: #daefdf; color: #2a704a; }
+.reception-request.request-rechazada { background: #fff3f4; border-color: #ebcbd1; }
+.request-rechazada .reception-state-label { background: #f7dfe3; color: #a1455b; }
+.reception-request.request-cancelada { background: #f7f4f8; border-color: #dfd6e6; }
+.request-cancelada .reception-state-label { background: #eae2ef; color: #7c638e; }
+.reception-request[class*="request-"]:hover { box-shadow: 0 5px 18px #800b2c12; border-color: #bc8b9d; }
+.reception-request-footer { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; margin-top: 18px; padding-top: 13px; border-top: 1px solid #f0ebed; font-size: 11px; }
+.reception-request-footer span { display: flex; align-items: center; gap: 6px; color: #64748b; }
+.reception-request-footer strong { color: var(--wine); font-size: 12px; }
+.reception-avatar { display: grid; place-items: center; flex-shrink: 0; width: 48px; height: 48px; background: var(--wine-soft); border: 1px solid #eedfe4; border-radius: 14px; color: var(--wine); }
+.reception-detail-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 15px; }
+.reception-detail-heading > div { flex: 1; }
+.reception-detail-heading h2 { margin-top: 3px; }
+.reception-steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); padding: 6px; gap: 6px; background: #f7f8fa; border: 1px solid #edf0f3; border-radius: 14px; }
+.reception-steps li { display: flex; align-items: center; gap: 11px; padding: 15px 13px; color: #88919d; border-radius: 10px; }
+.reception-step-number { display: grid; place-items: center; flex-shrink: 0; width: 31px; height: 31px; border-radius: 50%; background: #e8ebef; font-size: 13px; font-weight: 700; }
+.reception-steps strong { display: block; font-size: 12px; font-weight: 650; }
+.reception-steps small { display: block; margin-top: 4px; font-size: 10px; }
+.reception-steps .is-current { color: var(--wine); background: white; box-shadow: 0 2px 5px #29313e08; border: 1px solid #ead6dd; }
+.reception-steps .is-current .reception-step-number { background: var(--wine); color: white; }
+.reception-steps .is-complete { color: #23735b; }
+.reception-steps .is-complete .reception-step-number { background: #e0f0e9; }
+.reception-verification-layout { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 28px; align-items: start; padding-top: 8px; }
+.reception-status { display: flex; align-items: flex-start; gap: 13px; padding: 18px; border: 1px solid; border-radius: 12px; font-size: 13px; line-height: 1.6; }
+.reception-status > svg { flex-shrink: 0; margin-top: 2px; }
+.reception-status strong { display: block; font-size: 14px; font-weight: 700; }
+.reception-status p { margin-top: 3px; font-size: 12px; }
+.reception-status.is-success { color: #20674f; background: #eef8f3; border-color: #cce6d8; }
+.reception-status.is-warning { color: #825516; background: #fff9ee; border-color: #efdfbc; }
+.reception-lookup-box { text-align: center; padding: 28px 22px; border: 1px dashed #ddc8d0; background: #fefbfc; border-radius: 15px; }
+.reception-lookup-box .reception-avatar { margin: 0 auto 15px; width: 56px; height: 56px; }
+.reception-lookup-box h4, .reception-create-box h4 { font-size: 16px; font-weight: 700; color: #303746; }
+.reception-lookup-box > p, .reception-create-box > p { margin: 8px auto 18px; max-width: 420px; font-size: 13px; line-height: 1.7; color: #6b7280; }
+.reception-document { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 12px; margin-bottom: 20px; font-size: 12px; color: #6b7280; }
+.reception-document strong { font-size: 16px; color: #4d2532; letter-spacing: .06em; }
+.reception-applicant-summary { padding: 22px; background: #faf8f9; border: 1px solid #ece5e8; border-radius: 14px; }
+.reception-applicant-summary h4 { margin: 10px 0 20px; font-size: 16px; font-weight: 700; line-height: 1.5; }
+.reception-applicant-summary dl { display: grid; gap: 16px; }
+.reception-applicant-summary dt, .reception-patient-data dt { font-size: 11px; color: #77808d; margin-bottom: 4px; }
+.reception-applicant-summary dd, .reception-patient-data dd { font-size: 13px; font-weight: 550; overflow-wrap: anywhere; }
+.reception-help { font-size: 12px; line-height: 1.7; color: #76707a; }
+.reception-applicant-summary .reception-help { display: flex; align-items: flex-start; gap: 8px; border-top: 1px solid #e8e0e4; margin-top: 22px; padding-top: 18px; }
+.reception-applicant-summary .reception-help svg { flex-shrink: 0; margin-top: 2px; }
+.reception-patient-card { border: 1px solid #e4e8ed; border-radius: 13px; background: white; overflow: hidden; }
+.reception-patient-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 18px; background: #fcfcfd; border-bottom: 1px solid #edf0f3; }
+.reception-patient-heading > div { flex: 1; }
+.reception-patient-heading h4 { font-size: 15px; font-weight: 700; margin-top: 4px; }
+.reception-record-code { display: inline-flex; gap: 6px; align-items: center; color: #247158; background: #eaf6ef; padding: 7px 10px; border-radius: 7px; font-size: 12px; font-weight: 650; }
+.reception-patient-data { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; padding: 20px; }
+.reception-comparison { border: 1px solid #e4e8ed; border-radius: 12px; overflow: hidden; }
+.reception-comparison h4 { padding: 16px 18px; font-size: 13px; font-weight: 700; }
+.reception-comparison-scroll { overflow-x: auto; }
+.reception-comparison table { width: 100%; min-width: 460px; font-size: 12px; text-align: left; border-collapse: collapse; }
+.reception-comparison th, .reception-comparison td { padding: 12px 16px; border-top: 1px solid #edf0f3; vertical-align: top; }
+.reception-comparison thead { background: #f8f9fb; color: #677180; font-size: 10px; }
+.reception-comparison tbody th { color: #687181; font-weight: 500; }
+.reception-comparison > p { padding: 12px 18px; background: #fcfcfd; border-top: 1px solid #edf0f3; font-size: 11px; color: #76808e; }
+.reception-mismatch { display: block; margin-top: 4px; font-size: 10px; color: #946019; }
+.reception-identity-check { display: flex; align-items: flex-start; gap: 12px; padding: 16px; background: #fafafa; border: 1px solid #e3e5e9; border-radius: 10px; cursor: pointer; }
+.reception-identity-check input { margin-top: 3px; width: 18px; height: 18px; accent-color: var(--wine); flex-shrink: 0; }
+.reception-identity-check strong { display: block; font-size: 13px; font-weight: 600; }
+.reception-identity-check small { display: block; margin-top: 4px; font-size: 11px; color: #737d8b; line-height: 1.6; }
+.reception-identity-check.is-checked { background: var(--wine-soft); border-color: #d8aab9; }
+.reception-create-box { padding: 22px; border: 1px solid #eadce1; border-radius: 13px; }
+.reception-create-box > p { max-width: none; }
+.reception-create-box > button { margin-top: 18px; }
+.reception-action-bar { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding-top: 22px; border-top: 1px solid #edf0f3; }
+.reception-action-bar > div { text-align: right; }
+.reception-action-bar p { color: #8b7c82; font-size: 11px; margin-bottom: 8px; }
+.reception-secondary { padding: 12px 0; color: #667080; font-size: 13px; font-weight: 550; }
+.reception-search-page { max-width: 1050px; margin-inline: auto; }
+.reception-search-form { display: flex; align-items: center; gap: 16px; background: #faf8f9; border: 1px solid #eee5e9; padding: 22px; border-radius: 13px; margin-bottom: 24px; }
+.reception-search-form label { flex: 1; max-width: 480px; font-size: 12px; font-weight: 600; color: #424956; }
+.reception-search-form label small { display: block; margin-top: 6px; font-size: 11px; color: #85828b; font-weight: 400; }
+.reception-search-input { display: flex; align-items: center; gap: 10px; padding: 0 14px; margin-top: 7px; background: white; border: 1px solid #d9cbd1; border-radius: 9px; color: #9a7481; }
+.reception-search-input:focus-within { border-color: var(--wine); box-shadow: 0 0 0 3px #800b2c0b; }
+.reception-search-input input { width: 100%; padding: 14px 0; background: transparent; color: #343944; letter-spacing: .06em; font-size: 16px; outline: none; }
+.reception-search-input input:focus-visible { outline: none; }
+.reception-empty { display: flex; flex-direction: column; align-items: center; text-align: center; padding: 36px 20px; color: #aa8390; }
+.reception-empty h4 { font-size: 15px; font-weight: 600; color: #626978; margin: 14px 0 7px; }
+.reception-empty p { max-width: 400px; font-size: 12px; color: #8b919b; line-height: 1.8; }
+.reception-review-data { padding: 20px; background: #fcfbfc; border: 1px solid #eee7eb; border-radius: 13px; }
+.reception-review-data > div { padding: 4px 0 12px; border-bottom: 1px solid #eee7eb; }
+.reception-review-data dd { line-height: 1.7; color: #394150; }
+.reception-agenda-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 24px; padding: 20px; margin-bottom: 22px; background: #faf8f9; border: 1px solid #eee5e9; border-radius: 12px; }
+.reception-agenda-toolbar label { max-width: 260px; }
+.reception-agenda-toolbar > div { display: flex; align-items: center; gap: 10px; padding-left: 24px; border-left: 1px solid #e6d9df; }
+.reception-agenda-toolbar > div strong { color: var(--wine); font-size: 28px; }
+.reception-agenda-toolbar > div span, .reception-agenda-toolbar > p { font-size: 12px; color: #8a7780; }
+.reception-agenda-toolbar > p { margin-left: auto; }
+.reception-agenda-list { display: grid; gap: 10px; }
+.reception-agenda-item { display: flex; align-items: center; gap: 22px; padding: 18px; border: 1px solid #e8e9ed; border-radius: 12px; }
+.reception-agenda-time { flex-shrink: 0; min-width: 104px; padding-right: 22px; border-right: 1px solid #e9e7eb; }
+.reception-agenda-time strong { display: block; font-size: 16px; color: var(--wine); }
+.reception-agenda-time small { font-size: 10px; color: #8e8a91; }
+.reception-agenda-patient { flex: 1; min-width: 0; }
+.reception-agenda-patient strong { display: block; font-size: 14px; font-weight: 650; }
+.reception-agenda-patient span { display: block; font-size: 12px; color: #89909a; margin-top: 4px; }
+.reception-room { display: flex; align-items: center; gap: 7px; font-size: 11px; color: #78818f; }
+.reception-appointment-status { color: #267259; background: #edf7f1; border: 1px solid #d9ebdf; padding: 6px 10px; border-radius: 20px; font-size: 10px; font-weight: 650; }
+.reception-appointment-status.is-cancelled { background: #f9eff1; color: #9c4960; border-color: #efdae0; }
+@media (max-width: 1100px) {
+  .reception-verification-layout { grid-template-columns: minmax(0, 1fr); }
+  .reception-applicant-summary { order: -1; }
+  .reception-applicant-summary dl { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .reception-applicant-summary .reception-help { margin-top: 16px; padding-top: 12px; }
+}
+@media (max-width: 640px) {
+  .reception-agenda-item { flex-wrap: wrap; gap: 14px; }
+  .reception-agenda-time { min-width: 90px; padding-right: 14px; }
+  .reception-agenda-toolbar { gap: 18px; }
+  .reception-agenda-toolbar > p { margin-left: 0; }
+  .reception-agenda-toolbar > div { padding-left: 0; border: 0; }
+  .reception-intro { padding: 20px; }
+  .reception-intro-icon { display: none; }
+  .reception-tabs { grid-template-columns: 1fr; }
+  .reception-tabs button { padding: 11px 13px; }
+  .reception-tabs button small { display: none; }
+  .reception-steps { grid-template-columns: 1fr; }
+  .reception-steps li { padding: 10px; }
+  .reception-steps small { display: none; }
+  .reception-search-form { flex-direction: column; align-items: stretch; padding: 16px; }
+  .reception-action-bar { flex-direction: column-reverse; align-items: stretch; }
+  .reception-action-bar > div { text-align: center; }
+  .reception-action-bar button { width: 100%; }
+  .reception-section-heading { align-items: flex-start; }
+  .reception-patient-data { padding: 16px; gap: 16px; }
+}
