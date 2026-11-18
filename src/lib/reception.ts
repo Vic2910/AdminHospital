@@ -1,5 +1,7 @@
 import { supabase } from './supabase'
+import { availablePatientSlots } from './receptionBooking'
 import { orderAttentionRequests, type RequestOrder } from './receptionOrdering'
+import { patientExactFilter, patientMatch, patientPrimaryFilter, patientSearchFilter, patientSearchIntent, patientTextPattern, rankPatientMatches, searchText } from './patientSearch'
 
 export interface AttentionRequest {
   id: string; requester_id: string | null; patient_id: string | null; specialty_id: number
@@ -24,6 +26,10 @@ export interface DoctorDay {
   shifts: { starts_at: string; ends_at: string }[]
   consultations: { starts_at: string; ends_at: string; room_code: string; slot_minutes: number }[]
 }
+export interface ReceptionDoctor extends DoctorDay {
+  id: string; name: string; specialty: string
+  breaks: { starts_at: string; ends_at: string }[]
+}
 function client() { if (!supabase) throw new Error('Falta configurar Supabase.'); return supabase }
 function rpcError(error: { code?: string; message: string }) {
   if (error.code === '23P01') return new Error('Este horario acaba de ocuparse. Consulta nuevamente las horas disponibles.')
@@ -33,7 +39,7 @@ function rpcError(error: { code?: string; message: string }) {
 }
 export async function receptionRpc<T = unknown>(name: string, args: Record<string, unknown>): Promise<T> {
   const { data, error } = await client().rpc(name, args)
-  if (error) throw rpcError(error)
+  if (error) throw Object.assign(rpcError(error), { code: error.code })
   return data as T
 }
 export async function receptionRows<T>(table: string, columns: string): Promise<T[]> {
@@ -57,6 +63,55 @@ export async function searchPatients(dui: string) {
   const { data, error } = await client().from('patients').select('id,profile_id,first_name,last_name,patient_code,dui,birth_date,phone,email,city').eq('dui', dui).limit(10)
   if (error) throw new Error(error.message)
   return data as ReceptionPatient[]
+}
+
+export interface ReceptionPatientMatch extends ReceptionPatient {
+  record_code: string | null
+  record_id: string | null
+}
+const patientSearchColumns = 'id,profile_id,first_name,last_name,patient_code,dui,birth_date,phone,email,city,medical_records(id,record_code)'
+
+export async function searchReceptionPatients(value: string, signal?: AbortSignal): Promise<{ patients: ReceptionPatientMatch[]; hasMore: boolean }> {
+  const term = searchText(value)
+  if (term.length < 2) return { patients: [], hasMore: false }
+  let people = client().from('patients').select(patientSearchColumns).or(patientSearchFilter(term)).order('last_name').order('first_name').order('id').limit(21)
+  let records = client().from('medical_records').select('patient_id').regexIMatch('record_code', patientTextPattern(term)).order('record_code').limit(21)
+  let exact = client().from('patients').select(patientSearchColumns).or(patientExactFilter(term)).order('last_name').order('first_name').order('id').limit(21)
+  let primary = client().from('patients').select(patientSearchColumns).or(patientPrimaryFilter(term)).order('last_name').order('first_name').order('id').limit(21)
+  if (signal) { people = people.abortSignal(signal); records = records.abortSignal(signal); exact = exact.abortSignal(signal); primary = primary.abortSignal(signal) }
+  const [direct, byCode, exactMatches, primaryMatches] = await Promise.all([people, records, exact, primary])
+  if (direct.error || byCode.error || exactMatches.error || primaryMatches.error) throw new Error('No se pudo consultar el directorio autorizado. Comprueba tu conexión y los permisos de tu cuenta.')
+  const ids = [...new Set((byCode.data ?? []).map(record => record.patient_id))]
+  let codeMatches = [...(direct.data ?? []), ...(exactMatches.data ?? []), ...(primaryMatches.data ?? [])]
+  if (ids.length) {
+    let query = client().from('patients').select(patientSearchColumns).in('id', ids).limit(21)
+    if (signal) query = query.abortSignal(signal)
+    const result = await query
+    if (result.error) throw new Error('No se pudieron consultar los pacientes de estos expedientes.')
+    codeMatches = [...codeMatches, ...(result.data ?? [])]
+  }
+  const matches = codeMatches.map(row => {
+    const embedded = row.medical_records
+    const record = Array.isArray(embedded) ? embedded[0] : embedded
+    return { ...row, record_code: record?.record_code ?? null, record_id: record?.id ?? null } as ReceptionPatientMatch
+  })
+  const ranked = rankPatientMatches(matches, term)
+  const intent = patientSearchIntent(term)
+  const hasPrimary = ranked.some(patient => patientMatch(patient, term)?.field === intent)
+  const hasMore = ranked.length > 20 || (hasPrimary ? (primaryMatches.data?.length ?? 0) > 20 || (intent === 'record' && (byCode.data?.length ?? 0) > 20) : (direct.data?.length ?? 0) > 20 || (byCode.data?.length ?? 0) > 20 || (exactMatches.data?.length ?? 0) > 20)
+  return { patients: ranked.slice(0, 20), hasMore }
+}
+
+export async function readReceptionRecord(patientId: string, signal?: AbortSignal) {
+  let query = client().from('medical_records').select('id,patient_id,record_code,opened_at').eq('patient_id', patientId)
+  if (signal) query = query.abortSignal(signal)
+  const result = await query.maybeSingle()
+  if (result.error || !result.data) throw new Error('El expediente no está disponible para tu cuenta. Actualiza la búsqueda o solicita revisión.')
+  let historyQuery = client().from('medical_history').select('id,history_type,description,created_at').eq('record_id', result.data.id).order('created_at', { ascending: false }).limit(10)
+  if (signal) historyQuery = historyQuery.abortSignal(signal)
+  const history = await historyQuery
+  if (history.error) throw new Error('No se pudo consultar la información autorizada del expediente.')
+  return { ...result.data, history: history.data ?? [] }
 }
 export async function readAttentionRequest(id: string) {
   const { data, error } = await client().from('appointment_requests').select('*').eq('id', id).maybeSingle()
@@ -83,16 +138,24 @@ export async function requestSymptoms(id: string) {
   if (error) throw new Error(error.message)
   return (data ?? []).map(row => (row.symptom_catalog as unknown as { name: string } | null)?.name).filter(Boolean).join(', ')
 }
-export async function availableSlots(specialty: number, date: string, patientId: string | null) {
+export async function availableSlots(specialty: number, date: string, patientId: string | null, doctorId?: string) {
   const { data: doctors, error } = await client().from('doctor_specialties').select('doctor_id').eq('specialty_id', specialty)
   if (error) throw new Error(error.message)
   const ids = new Set((doctors ?? []).map(d => d.doctor_id))
   const from = `${date}T00:00:00-06:00`
   const until = new Date(new Date(from).getTime() + 86400000).toISOString()
-  const slots = await receptionRpc<Slot[]>('get_medical_availability', { p_from: from, p_until: until })
-  const { data: booked, error: bookedError } = await client().from('appointments').select('consulting_room_id,patient_id,starts_at,ends_at').lt('starts_at', until).gt('ends_at', from).in('status', ['programada', 'confirmada', 'en_atencion'])
+  const slots = await receptionRpc<Slot[]>('get_medical_availability', { p_from: from, p_until: until, ...(doctorId ? { p_doctor: doctorId } : {}) })
+  const { data: booked, error: bookedError } = await client().from('appointments').select('doctor_id,consulting_room_id,patient_id,starts_at,ends_at').lt('starts_at', until).gt('ends_at', from).in('status', ['programada', 'confirmada', 'en_atencion'])
   if (bookedError) throw new Error(bookedError.message)
-  return slots.filter(s => ids.has(s.doctor_id) && !(booked ?? []).some(b => (b.consulting_room_id === s.consulting_room_id || b.patient_id === patientId) && new Date(b.starts_at) < new Date(s.ends_at) && new Date(b.ends_at) > new Date(s.starts_at)))
+  return availablePatientSlots(slots, booked ?? [], ids, patientId, Date.now(), doctorId)
+}
+export async function receptionDoctors(specialty: number, date: string, patientId: string) {
+  try { return { doctors: await receptionRpc<ReceptionDoctor[]>('reception_specialty_doctors', { p_specialty: specialty, p_day: date }), complete: true } }
+  catch (error) {
+    if (!['PGRST202', '42883'].includes((error as { code?: string }).code ?? '')) throw error
+    const slots = await availableSlots(specialty, date, patientId)
+    return { doctors: [...new Map(slots.map(slot => [slot.doctor_id, { id: slot.doctor_id, name: slot.doctor_name, specialty: '', shifts: [], consultations: [], breaks: [] }])).values()] as ReceptionDoctor[], complete: false }
+  }
 }
 export async function loadAgenda(date: string) {
   return receptionRpc<ReceptionAppointment[]>('reception_agenda', { p_day: date })

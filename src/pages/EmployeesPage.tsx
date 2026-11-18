@@ -1,17 +1,29 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useState, type KeyboardEvent } from 'react'
 import { Panel } from '../components/ui'
+import { EmployeeActionButton } from '../components/EmployeeActionButton'
+import { EmployeeDetailDialog } from '../components/EmployeeDetailDialog'
+import { EmployeeStateDialog } from '../components/EmployeeStateDialog'
 import { Icon } from '../components/Icon'
+import { employeeUpdatePayload, employeeUpdateMatches } from '../lib/employeeEditing'
 import { hospitalDate } from '../lib/planningDates'
 import './AdminExperience.css'
-import { employeeRequest, type Employee, type EmployeeInput, type EmployeeCatalogs, type PendingEmployee } from '../lib/employees'
+import './EmployeesPage.css'
+import { EmployeeCity, EmployeeBirthDate, EmployeeTextField, EmployeeSpecialties } from '../components/EmployeeFields'
+import { EmployeeCredentials, type InitialCredentials } from '../components/EmployeeCredentials'
+import { formatEmployeePhone, validEmployeePhone, validEmployeeBirthDate } from '../../supabase/functions/manage-employees/validation'
+import { employeeRequest, type EmployeeMutationResult, type Employee, type EmployeeInput, type EmployeeCatalogs, type PendingEmployee } from '../lib/employees'
 
 const inputClass = 'mt-1.5 w-full rounded-md border border-slate-200 bg-[#f8f6f7] px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#870b30]/25'
 const buttonClass = 'rounded-md bg-[#870b30] px-3 py-2 text-xs font-medium text-white hover:bg-[#6f0827] disabled:cursor-not-allowed disabled:opacity-50'
 const secondaryClass = 'rounded-md border border-slate-200 px-3 py-2 text-xs text-slate-600 hover:bg-slate-50 disabled:opacity-50'
-const emptyForm = (): EmployeeInput => ({ requestId: crypto.randomUUID(), givenNames: '', familyNames: '', email: '', password: '', phone: '', birthDate: '', city: '', employeeCode: '', role: 'doctor', specialties: [], active: true })
+const emptyForm = (): EmployeeInput => ({ requestId: crypto.randomUUID(), givenNames: '', familyNames: '', email: '', phone: '', birthDate: '', city: '', employeeCode: '', role: 'doctor', specialties: [], active: true })
 const roleName = (role: string) => role === 'doctor' ? 'Doctor' : 'Recepcionista'
 
 export function EmployeesPage({ onSchedule }: { onSchedule?: (staffId?: string) => void }) {
+  const [view, setView] = useState<'register' | 'directory'>('register')
+  const [stateEmployee, setStateEmployee] = useState<Employee | null>(null)
+  const [stateError, setStateError] = useState('')
+  const [editingFromDetail, setEditingFromDetail] = useState(false)
   const [savedStaffId, setSavedStaffId] = useState<string | undefined>()
   const [catalogs, setCatalogs] = useState<EmployeeCatalogs>({ specialties: [] })
   const [employees, setEmployees] = useState<Employee[]>([])
@@ -26,120 +38,214 @@ export function EmployeesPage({ onSchedule }: { onSchedule?: (staffId?: string) 
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [loadError, setLoadError] = useState('')
+  const [catalogError, setCatalogError] = useState('')
+  const [catalogLoading, setCatalogLoading] = useState(true)
   const [today] = useState(() => hospitalDate())
   const [notice, setNotice] = useState('')
-  const [form, setForm] = useState<EmployeeInput | null>(null)
+  const [form, setForm] = useState<EmployeeInput | null>(emptyForm)
   const [editing, setEditing] = useState<Employee | null>(null)
+  const [credentials, setCredentials] = useState<InitialCredentials | null>(null)
+  useEffect(() => {
+    if (!credentials) return
+    const timer = window.setTimeout(() => setCredentials(null), 300000)
+    return () => window.clearTimeout(timer)
+  }, [credentials])
   const [detail, setDetail] = useState<Employee | null>(null)
 
   useEffect(() => {
+    if (view !== 'directory') return
     let active = true
     const timer = window.setTimeout(() => {
       setLoading(true)
-      Promise.all([
-        employeeRequest<{ employees: Employee[]; total: number }>('list', { query: query.trim(), role, status, offset }),
-        employeeRequest<EmployeeCatalogs>('catalogs'),
-        employeeRequest<PendingEmployee[]>('pending'),
-      ]).then(([directory, options, unfinished]) => {
+      employeeRequest<{ employees: Employee[]; total: number }>('list', { query: query.trim(), role, status, offset }).then(directory => {
         if (!active) return
-        setEmployees(directory.employees); setTotal(directory.total); setCatalogs(options); setPending(unfinished); setLoadError('')
+        setEmployees(directory.employees); setTotal(directory.total); setLoadError('')
       }).catch((err: unknown) => {
         if (active) { setEmployees([]); setLoadError(err instanceof Error ? err.message : 'No se pudo cargar el personal.') }
       }).finally(() => { if (active) setLoading(false) })
     }, 250)
     return () => { active = false; window.clearTimeout(timer) }
-  }, [query, role, status, offset, revision])
+  }, [query, role, status, offset, revision, view])
+
+  useEffect(() => {
+    let active = true
+    Promise.all([employeeRequest<EmployeeCatalogs>('catalogs'), employeeRequest<PendingEmployee[]>('pending')])
+      .then(([options, unfinished]) => { if (active) { setCatalogs(options); setPending(unfinished); setCatalogError('') } })
+      .catch((err: unknown) => { if (active) setCatalogError(err instanceof Error ? err.message : 'No se pudieron cargar los datos de registro.') })
+      .finally(() => { if (active) setCatalogLoading(false) })
+    return () => { active = false }
+  }, [revision])
 
   function change<K extends keyof EmployeeInput>(key: K, value: EmployeeInput[K]) {
     setForm(current => current ? { ...current, [key]: value } : current)
   }
-  function openRegistration() { setForm(emptyForm()); setEditing(null); setDetail(null); setNotice(''); setError('') }
-  function openEdit(employee: Employee) {
-    setEditing(employee); setDetail(null); setError(''); setNotice('')
-    setForm({ ...emptyForm(), ...employee, city: employee.city ?? '', phone: employee.phone ?? '', birthDate: employee.birthDate ?? '' })
+  function openRegistration() { if (!form || editing) setForm(emptyForm()); setEditing(null); setDetail(null); setNotice(''); setError(''); setView('register') }
+  function openDirectory() { setView('directory'); setDetail(null); setError('') }
+  function applyEmployee(employee: Employee) {
+    setEmployees(current => current.map(item => item.id === employee.id ? employee : item))
+    setDetail(current => current?.id === employee.id ? employee : current)
   }
-  async function save(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    if (!form || busy) return
-    if (!form.givenNames.trim() || !form.familyNames.trim() || !form.employeeCode.trim() || (form.role === 'doctor' && !form.specialties.length)) { setError('Completa nombre, apellido, código y, para doctores, especialidades.'); return }
-    if (!window.confirm(`${editing ? '¿Guardar los cambios de' : '¿Registrar a'} ${form.givenNames.trim()} ${form.familyNames.trim()} como ${roleName(form.role).toLocaleLowerCase()}?`)) return
-    setBusy(true); setError(''); setNotice('')
-    try {
-      if (editing) {
-        await employeeRequest('update', { id: editing.id, staffVersion: editing.staffVersion, personVersion: editing.personVersion, values: { given_names: form.givenNames.trim(), family_names: form.familyNames.trim(), birth_date: form.birthDate || null, employee_code: form.employeeCode.trim(), phone: form.phone.trim(), city: form.city.trim(), specialties: form.specialties } })
-      } else if (pending.some(p => p.id === form.requestId)) {
-        await employeeRequest('recover', { requestId: form.requestId, values: form })
-      } else {
-        await employeeRequest('create', form)
-      }
-      setNotice(editing ? 'Datos del empleado actualizados.' : 'Empleado registrado: cuenta, perfil, rol y datos hospitalarios completados.')
-      setSavedStaffId(editing?.id)
-      if (!editing) {
-        try {
-          const directory = await employeeRequest<{ employees: Employee[] }>('list', { query: form.employeeCode })
-          setSavedStaffId(directory.employees.find(e => e.employeeCode === form.employeeCode.trim())?.id)
-        } catch { /* The successful registration remains confirmed; scheduling can select the employee. */ }
-      }
-      setForm(null); setEditing(null)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo guardar el empleado.')
-      // Passwords remain only in memory and are cleared even on failure.
-      setForm(current => current ? { ...current, password: '' } : current)
-    } finally { setBusy(false); setRevision(r => r + 1) }
-  }
-  async function run(action: 'state' | 'recover' | 'detail', data: object) {
+  async function openEdit(employee: Employee, fromDetail = false) {
     if (busy) return
     setBusy(true); setError(''); setNotice('')
     try {
-      const result = await employeeRequest<Employee>(action, data)
-      if (action === 'detail') { setDetail(result); setForm(null); setEditing(null) }
-      else { setNotice(action === 'recover' ? 'Alta completada correctamente.' : 'Estado del empleado actualizado.'); setRevision(r => r + 1) }
+      const current = await employeeRequest<Employee>('detail', { id: employee.id })
+      setView('register'); setEditing(current); setEditingFromDetail(fromDetail); setDetail(null)
+      setForm({ ...emptyForm(), ...current, city: current.city ?? '', phone: formatEmployeePhone(current.phone ?? ''), birthDate: current.birthDate ?? '' })
+    } catch (err) { setError(err instanceof Error ? err.message : 'No se pudo cargar el perfil para editar.') }
+    finally { setBusy(false) }
+  }
+  function nextField(event: KeyboardEvent<HTMLFormElement>) {
+    if (event.key !== 'Enter' || event.defaultPrevented || event.nativeEvent.isComposing) return
+    const target = event.target as HTMLElement
+    if (!(target instanceof HTMLInputElement) || target.type === 'date') return
+    event.preventDefault()
+    const fields = Array.from(event.currentTarget.querySelectorAll<HTMLInputElement | HTMLSelectElement>('input, select')).filter(field => !field.matches(':disabled') && field.type !== 'hidden' && field.getClientRects().length > 0)
+    fields[fields.indexOf(target) + 1]?.focus()
+  }
+  async function save() {
+    if (!form || busy) return
+    if (!form.givenNames.trim() || !form.familyNames.trim() || (form.role === 'doctor' && !form.specialties.length)) { setError('Completa los nombres, apellidos y, para doctores, al menos una especialidad.'); return }
+    if (!validEmployeePhone(form.phone)) { setError('El teléfono debe tener 8 dígitos y comenzar con 2, 5, 6 o 7.'); return }
+    if (!validEmployeeBirthDate(form.birthDate, today)) { setError('Escribe una fecha de nacimiento real entre 01/01/1900 y hoy, con formato DD/MM/AAAA.'); return }
+    setBusy(true); setError(''); setNotice('')
+    let updateReadbackFailed = false
+    try {
+      let result: EmployeeMutationResult | undefined
+      if (editing) {
+        result = await employeeRequest<EmployeeMutationResult>('update', employeeUpdatePayload(editing, form))
+      } else if (pending.some(p => p.id === form.requestId)) {
+        result = await employeeRequest('recover', { requestId: form.requestId, values: form })
+      } else {
+        result = await employeeRequest('create', { ...form, employeeCode: undefined })
+      }
+      if (editing) {
+        // Old deployed versions return success only; preserve compatibility with a read-back.
+        updateReadbackFailed = !result?.employee
+        const confirmed = result?.employee ?? await employeeRequest<Employee>('detail', { id: editing.id })
+        updateReadbackFailed = false
+        if (!employeeUpdateMatches(confirmed, editing, form)) throw new Error('El servicio no confirmó todos los cambios solicitados. Los datos del formulario se conservaron; actualiza la ficha antes de volver a guardar.')
+        applyEmployee(confirmed)
+        if (editingFromDetail) setDetail(confirmed)
+      }
+      setNotice(editing ? 'Datos del empleado actualizados.' : `Empleado registrado correctamente${result?.employeeCode ? ` con código ${result.employeeCode}` : ''}.`)
+      setSavedStaffId(editing?.id ?? result?.staffId)
+      if (result?.credentials) setCredentials({ ...result.credentials, employeeCode: result.employeeCode, name: `${form.givenNames.trim()} ${form.familyNames.trim()}`, role: roleName(form.role), active: form.active })
+      setForm(emptyForm()); setEditing(null); setView(editing ? 'directory' : 'register')
+    } catch (err) {
+      setError(updateReadbackFailed ? 'El servicio recibió la edición, pero no se pudo verificar el resultado. Abre el directorio y pulsa Actualizar antes de editar nuevamente.' : err instanceof Error ? err.message : 'No se pudo guardar el empleado.')
+    } finally { setBusy(false); setRevision(r => r + 1) }
+  }
+  async function run(action: 'recover' | 'detail', data: object) {
+    if (busy) return
+    setBusy(true); setError(''); setNotice('')
+    try {
+      const result = await employeeRequest<Employee & { credentials?: { email: string; password: string }; employeeCode?: string; employee?: { givenNames: string; familyNames: string; role: string; active: boolean } }>(action, data)
+      if (result.credentials && result.employee) setCredentials({ ...result.credentials, employeeCode: result.employeeCode, name: `${result.employee.givenNames} ${result.employee.familyNames}`, role: roleName(result.employee.role), active: result.employee.active })
+      if (action === 'detail') { setDetail(result) }
+      else { setNotice('Alta completada correctamente.'); setRevision(r => r + 1) }
     } catch (err) { setError(err instanceof Error ? err.message : 'No se pudo completar la operación.') }
     finally { setBusy(false) }
   }
 
-  return <div className="space-y-4">
+  async function openEmployeeState(employee: Employee) {
+    if (busy) return
+    setBusy(true); setError(''); setStateError('')
+    try { setStateEmployee(await employeeRequest<Employee>('detail', { id: employee.id })) }
+    catch (err) { setError(err instanceof Error ? err.message : 'No se pudieron consultar las asignaciones del empleado.') }
+    finally { setBusy(false) }
+  }
+
+  async function changeEmployeeState() {
+    if (!stateEmployee || busy) return
+    if (!canChangeState || (stateEmployee.active && !stateEmployee.impact)) { setStateError('Es necesario actualizar el servicio para confirmar el bloqueo de acceso y revisar las asignaciones. No se realizó ningún cambio.'); return }
+    setBusy(true); setStateError('')
+    try {
+      const result = await employeeRequest<EmployeeMutationResult>('state', { id: stateEmployee.id, active: !stateEmployee.active, staffVersion: stateEmployee.staffVersion, impactAcknowledged: true, impact: stateEmployee.impact })
+      const confirmed = result.employee ?? await employeeRequest<Employee>('detail', { id: stateEmployee.id })
+      if (confirmed.id !== stateEmployee.id || confirmed.active !== !stateEmployee.active) throw new Error('El servidor no confirmó el cambio de estado. Actualiza la ficha antes de volver a intentarlo.')
+      applyEmployee(confirmed)
+      setNotice(`${confirmed.givenNames} ${confirmed.familyNames}: cuenta ${confirmed.active ? 'reactivada' : 'desactivada'}.`)
+      setSavedStaffId(undefined); setStateEmployee(null); setRevision(current => current + 1)
+    } catch (err) { setStateError(err instanceof Error ? err.message : 'No se pudo actualizar el acceso del empleado.') }
+    finally { setBusy(false) }
+  }
+
+  const canChangeState = Boolean(catalogs.contract?.actions?.includes('state') && catalogs.contract?.features?.includes('auth-state-control'))
+
+  const registrationSections = form ? [
+    { id: 'employee-personal', title: 'Datos personales', detail: 'Conoce a tu nuevo integrante', complete: Boolean(form.givenNames.trim() && form.familyNames.trim()) },
+    { id: 'employee-work', title: 'Perfil profesional', detail: 'Su lugar dentro del hospital', complete: Boolean(form.role !== 'doctor' || form.specialties.length) },
+    { id: 'employee-access', title: 'Contacto y acceso', detail: 'Todo listo para conectar', complete: /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email) && validEmployeePhone(form.phone) },
+  ] : []
+
+  return <div className="employees-page space-y-4">
+    {detail && view === 'directory' && <EmployeeDetailDialog employee={detail} specialties={catalogs.specialties} busy={busy} error={error} onClose={() => { setDetail(null); setError('') }} onEdit={() => void openEdit(detail, true)} />}
+    {stateEmployee && <EmployeeStateDialog key={`${stateEmployee.id}:${JSON.stringify(stateEmployee.impact)}`} employee={stateEmployee} busy={busy} error={stateError} authControl={canChangeState} onRefresh={() => void openEmployeeState(stateEmployee)} onCancel={() => setStateEmployee(null)} onConfirm={() => void changeEmployeeState()} />}
+    {credentials && <EmployeeCredentials credentials={credentials} onClose={() => setCredentials(null)} />}
     <div className="experience-heading rounded-xl border border-slate-200 bg-white p-5">
-      <div><span className="experience-eyebrow">EQUIPO DEL HOSPITAL</span><h2>Personal hospitalario</h2><p>Registra al personal, revisa sus datos y organiza sus jornadas desde un solo lugar.</p></div>
-      <button className={buttonClass} disabled={busy || loading} onClick={openRegistration} type="button">+ Registrar empleado</button>
+      <div><span className="experience-eyebrow">EQUIPO DEL HOSPITAL</span><h2>{view === 'register' ? 'Registrar empleado' : 'Personal hospitalario'}</h2><p>{view === 'register' ? 'Completa el perfil de quien se une al equipo del hospital.' : 'Consulta, organiza y gestiona a los integrantes de tu equipo.'}</p></div>
+      <button className={`${buttonClass} employee-view-toggle`} disabled={busy} onClick={view === 'register' ? openDirectory : openRegistration} type="button"><Icon name={view === 'register' ? 'users' : 'plus'} size={18} />{view === 'register' ? 'Visualizar empleados' : 'Registrar empleado'}</button>
     </div>
-    {error && <p className="rounded-lg bg-rose-50 p-3 text-xs text-rose-800" role="alert">{error}</p>}
-    {loadError && <p className="rounded-lg bg-rose-50 p-3 text-xs text-rose-800" role="alert">{loadError}</p>}
-    {notice && <p className="rounded-lg bg-emerald-50 p-3 text-xs text-emerald-800" role="status">{notice}{onSchedule && <button type="button" className={`${secondaryClass} ml-3`} onClick={() => onSchedule(savedStaffId)}>Asignar horario laboral</button>}</p>}
-    {form && <Panel title={editing ? 'Editar empleado' : 'Registrar personal hospitalario'} subtitle="Los campos marcados con * son obligatorios.">
-      <form onSubmit={save} className="space-y-4">
-        <fieldset disabled={busy} className="employee-form-section"><legend>1. Cargo y rol</legend><p>Selecciona el tipo de empleado. Los campos profesionales se adaptan al cargo.</p><div className="employee-form-grid">
-          <label className="text-xs font-medium text-slate-700">Cargo *<select className={inputClass} value={form.role} disabled={Boolean(editing)} onChange={e => { change('role', e.target.value as EmployeeInput['role']); change('specialties', []) }}><option value="doctor">Doctor</option><option value="receptionist">Recepcionista</option></select>{editing && <small className="mt-2 block text-slate-400">El rol no se cambia desde la edición de datos.</small>}</label>
-          {!editing && <label className="flex items-center gap-2 text-xs text-slate-700"><input type="checkbox" className="accent-[#870b30]" checked={form.active} onChange={e => change('active', e.target.checked)} /> Empleado activo desde su registro</label>}
+    {error && view === 'directory' && <p className="rounded-lg bg-rose-50 p-3 text-xs text-rose-800" role="alert">{error}</p>}
+    {catalogError && <p className="rounded-lg bg-rose-50 p-3 text-xs text-rose-800" role="alert">{catalogError} <button type="button" className="underline" onClick={() => setRevision(current => current + 1)}>Actualizar opciones</button></p>}
+    {view === 'directory' && loadError && <p className="rounded-lg bg-rose-50 p-3 text-xs text-rose-800" role="alert">{loadError}</p>}
+    {notice && <p className="rounded-lg bg-emerald-50 p-3 text-xs text-emerald-800" role="status">{notice}{onSchedule && savedStaffId && <button type="button" className={`${secondaryClass} ml-3`} onClick={() => onSchedule(savedStaffId)}>Asignar horario laboral</button>}</p>}
+    {view === 'register' && form && <section className="employee-registration" aria-labelledby="employee-registration-title">
+      <header className="employee-registration-hero">
+        <div className="employee-registration-emblem" aria-hidden="true"><Icon name="users" size={31} /><span><Icon name="plus" size={12} /></span></div>
+        <div className="employee-registration-intro"><span className="employee-registration-eyebrow">PERSONAS QUE HACEN LA DIFERENCIA</span><h2 id="employee-registration-title">{editing ? 'Actualiza su perfil' : 'Un nuevo talento para tu equipo'}</h2><p>{editing ? 'Mantén su información al día y su perfil bien organizado.' : 'Dale la bienvenida. Nosotros te ayudamos a preparar su perfil y acceso.'}</p></div>
+        <span className="employee-registration-label"><Icon name="patient" size={16} /> Hospital Móviles</span>
+      </header>
+      <nav className="employee-registration-steps" aria-label="Secciones del formulario">{registrationSections.map((section, index) => <a href={`#${section.id}`} key={section.id} className={section.complete ? 'is-complete' : ''}><span className="employee-step-number">{section.complete ? <Icon name="check" size={17} /> : `0${index + 1}`}</span><span><strong>{section.title}</strong><small>{section.detail}</small></span><Icon name="chevron" size={15} /></a>)}</nav>
+      <form key={form.requestId} onSubmit={event => event.preventDefault()} onKeyDown={nextField} className="employee-registration-form">
+        <div className="employee-registration-body">
+        <div className="employee-registration-fields">
+        <fieldset id="employee-personal" disabled={busy || catalogLoading} className="employee-form-section"><legend><span className="employee-section-icon"><Icon name="users" size={20} /></span><span><small>ACERCA DEL EMPLEADO</small>Datos personales</span><span className="employee-section-number">01</span></legend><p>Escribe los datos del empleado como aparecen en su documento.</p><div className="employee-form-grid">
+          <EmployeeTextField label="Nombres" symbol="person" placeholder="Escribe sus nombres" autoComplete="given-name" maxLength={100} required value={form.givenNames} onChange={e => change('givenNames', e.target.value)} />
+          <EmployeeTextField label="Apellidos" symbol="person" placeholder="Escribe sus apellidos" autoComplete="family-name" maxLength={100} required value={form.familyNames} onChange={e => change('familyNames', e.target.value)} />
+          <div className="employee-field"><span className="employee-field-label">Fecha de nacimiento<small>Opcional</small></span><EmployeeBirthDate className={inputClass} today={today} value={form.birthDate} onChange={value => change('birthDate', value)} /></div>
+          <div className="employee-field"><span className="employee-field-label">Ciudad o distrito<small>Opcional</small></span><EmployeeCity className={inputClass} value={form.city} onChange={value => change('city', value)} /></div>
         </div></fieldset>
-        <fieldset disabled={busy} className="employee-form-section"><legend>2. Datos personales</legend><p>Escribe los datos del empleado como aparecen en su documento.</p><div className="employee-form-grid">
-          <label className="text-xs font-medium text-slate-700">Nombre *<input className={inputClass} autoComplete="given-name" maxLength={100} required value={form.givenNames} onChange={e => change('givenNames', e.target.value)} /></label>
-          <label className="text-xs font-medium text-slate-700">Apellido *<input className={inputClass} autoComplete="family-name" maxLength={100} required value={form.familyNames} onChange={e => change('familyNames', e.target.value)} /></label>
-          <label className="text-xs font-medium text-slate-700">Fecha de nacimiento<input className={inputClass} type="date" max={today} value={form.birthDate} onChange={e => change('birthDate', e.target.value)} /></label>
-          <label className="text-xs font-medium text-slate-700">Ciudad<input className={inputClass} maxLength={120} value={form.city} onChange={e => change('city', e.target.value)} /></label>
-        </div></fieldset>
-        <fieldset disabled={busy} className="employee-form-section"><legend>3. Contacto y acceso</legend><p>El correo se utiliza para iniciar sesión en la aplicación autorizada del empleado.</p><div className="employee-form-grid">
-          <label className="text-xs font-medium text-slate-700">Correo electrónico *<input className={inputClass} type="email" autoComplete="off" maxLength={254} required disabled={Boolean(editing) || pending.some(p => p.id === form.requestId)} value={form.email} onChange={e => change('email', e.target.value)} /></label>
-          <label className="text-xs font-medium text-slate-700">Teléfono *<input className={inputClass} type="tel" autoComplete="tel" minLength={7} maxLength={30} required value={form.phone} onChange={e => change('phone', e.target.value)} /></label>
-          {!editing && <label className="text-xs font-medium text-slate-700">Contraseña inicial *<input className={inputClass} type="password" autoComplete="new-password" minLength={12} maxLength={128} required value={form.password} onChange={e => change('password', e.target.value)} /><span className="mt-1 block text-[10px] text-slate-500">12–128 caracteres con mayúscula, minúscula, número y símbolo.</span></label>}
-        </div></fieldset>
-        <fieldset disabled={busy} className="employee-form-section"><legend>4. Información profesional{form.role === 'doctor' ? ' y especialidades' : ''}</legend><p>Asigna un código único para identificar al empleado dentro del hospital.</p><div className="employee-form-grid"><label className="text-xs font-medium text-slate-700">Código único de empleado *<input className={inputClass} autoComplete="off" maxLength={80} required value={form.employeeCode} onChange={e => change('employeeCode', e.target.value)} /></label></div>
-          {form.role === 'doctor' && <div className="mt-5"><p className="mb-3 text-xs font-semibold text-slate-600">Especialidades * · selecciona una o varias</p><div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">{catalogs.specialties.map(sp => <label key={sp.id} className="employee-specialty"><input type="checkbox" className="accent-[#870b30]" checked={form.specialties.includes(sp.id)} onChange={e => change('specialties', e.target.checked ? [...form.specialties, sp.id] : form.specialties.filter(id => id !== sp.id))} />{sp.name}</label>)}</div>{!catalogs.specialties.length && <p className="mt-3 text-xs text-amber-700">No hay especialidades disponibles. Actualiza el directorio antes de registrar al doctor.</p>}</div>}
+        <fieldset id="employee-work" disabled={busy || catalogLoading} className="employee-form-section"><legend><span className="employee-section-icon"><Icon name="file" size={20} /></span><span><small>SU PERFIL EN EL HOSPITAL</small>Datos laborales</span><span className="employee-section-number">02</span></legend><p>Selecciona el tipo de empleado. Los campos profesionales se adaptan al cargo.</p><div className="employee-role-options" role="group" aria-label="Cargo del empleado">{([{ value: 'doctor', title: 'Doctor', description: 'Atención médica y especialidades', icon: 'activity' }, { value: 'receptionist', title: 'Recepcionista', description: 'Recepción y atención al paciente', icon: 'users' }] as const).map(option => <label key={option.value} className={`employee-role-option ${form.role === option.value ? 'is-selected' : ''}`}><input type="radio" name="employee-role" value={option.value} checked={form.role === option.value} disabled={Boolean(editing)} onChange={() => { change('role', option.value); change('specialties', []) }} /><span className="employee-role-icon"><Icon name={option.icon} size={23} /></span><span><strong>{option.title}</strong><small>{option.description}</small></span><span className="employee-role-check" aria-hidden="true">{form.role === option.value && <Icon name="check" size={13} />}</span></label>)}</div>
+          {editing && <p className="employee-hint">El cargo se conserva al editar los datos.</p>}
+          <div className="employee-form-grid employee-work-details">
+            <div className="employee-code-assignment"><span className="employee-field-label">Código de empleado</span><div><span className="employee-code-icon"><Icon name="file" size={20} /></span><strong>{editing ? form.employeeCode : 'Asignación automática'}</strong><span className="employee-code-badge">{editing ? 'Asignado' : '001 → 999'}</span></div><small>{editing ? 'Este código identifica al empleado y se conserva.' : 'Se asignará el siguiente número disponible al guardar.'}</small></div>
+            {!editing && <label className="employee-activation"><input type="checkbox" className="accent-[#870b30]" checked={form.active} onChange={e => change('active', e.target.checked)} /><span><strong>Activar al registrar</strong><small>Permitir el acceso a su cuenta.</small></span><span className="employee-activation-indicator" aria-hidden="true" /></label>}
+          </div>
+          {form.role === 'doctor' && <EmployeeSpecialties options={catalogs.specialties} selected={form.specialties} onChange={value => change('specialties', value)} />}
         </fieldset>
-        <section className="employee-review"><h3 className="flex items-center gap-2"><Icon name="check" size={18} />5. Revisa antes de guardar</h3><dl>{[['Empleado', `${form.givenNames} ${form.familyNames}`.trim()], ['Cargo', roleName(form.role)], ['Código', form.employeeCode], ['Correo', form.email], ['Teléfono', form.phone], ...(form.role === 'doctor' ? [['Especialidades', catalogs.specialties.filter(s => form.specialties.includes(s.id)).map(s => s.name).join(', ')]] : [])].map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value || 'Pendiente de completar'}</dd></div>)}</dl><p>Comprueba que los datos sean correctos. Al guardar se te pedirá confirmar {editing ? 'los cambios' : 'el registro'}.</p></section>
-        <div className="flex flex-wrap gap-3 border-t border-slate-100 pt-5"><button className={`${buttonClass} px-5 py-3`} disabled={busy} type="submit">{busy ? 'Guardando, espera un momento…' : editing ? 'Confirmar y guardar cambios' : 'Confirmar y registrar empleado'}</button><button className={`${secondaryClass} px-5 py-3`} disabled={busy} type="button" onClick={() => { setForm(null); setEditing(null) }}>Cancelar</button></div>
+        <fieldset id="employee-access" disabled={busy || catalogLoading} className="employee-form-section"><legend><span className="employee-section-icon"><Icon name="lock" size={20} /></span><span><small>SIEMPRE EN CONTACTO</small>Contacto y acceso</span><span className="employee-section-number">03</span></legend><p>El correo se utiliza para iniciar sesión en la aplicación autorizada del empleado.</p><div className="employee-form-grid">
+          <EmployeeTextField label="Correo electrónico" symbol="email" hint="Será su usuario para iniciar sesión." type="email" placeholder="nombre@correo.com" autoComplete="off" maxLength={254} required disabled={Boolean(editing) || pending.some(p => p.id === form.requestId)} value={form.email} onChange={e => change('email', e.target.value)} />
+          <EmployeeTextField label="Teléfono" symbol="phone" hint="8 dígitos. El guion se agrega automáticamente." type="tel" autoComplete="tel" inputMode="numeric" pattern="[2567][0-9]{3}-[0-9]{4}" title="8 dígitos; inicia con 2, 5, 6 o 7. Ejemplo: 7777-7777" placeholder="7777-7777" required value={form.phone} onChange={e => change('phone', formatEmployeePhone(e.target.value))} />
+          {!editing && <div className="employee-access-note"><span className="employee-access-icon"><Icon name="lock" size={19} /></span><div><strong>Sus datos de acceso, listos al finalizar</strong><p>Al registrar verás el correo y la contraseña inicial para entregárselos.</p></div></div>}
+        </div></fieldset>
+        </div>
+        <aside className="employee-registration-sidebar" aria-label="Vista previa y ayuda de registro">
+        <section className="employee-review"><span className="employee-preview-eyebrow">VISTA PREVIA DEL PERFIL</span><div className="employee-profile-preview"><div className="employee-profile-cover"><Icon name="patient" size={23} /><span>HOSPITAL MÓVILES</span></div><div className="employee-profile-avatar" aria-hidden="true">{form.givenNames.trim() || form.familyNames.trim() ? `${form.givenNames.trim().charAt(0)}${form.familyNames.trim().charAt(0)}`.toLocaleUpperCase() : <Icon name="users" size={30} />}</div><h3>{`${form.givenNames} ${form.familyNames}`.trim() || 'Nombre del empleado'}</h3><p>{roleName(form.role)}</p><span className={`employee-profile-status ${form.active ? 'is-active' : ''}`}><i />{form.active ? 'Activo al registrar' : 'Cuenta inactiva'}</span></div><h3 className="employee-summary-heading"><Icon name="file" size={17} />Resumen del registro</h3><dl>{[['Código', editing ? form.employeeCode : 'Automático al registrar'], ['Correo', form.email], ['Teléfono', form.phone], ...(form.role === 'doctor' ? [['Especialidades', catalogs.specialties.filter(s => form.specialties.includes(s.id)).map(s => s.name).join(', ')]] : [])].map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value || 'Pendiente de completar'}</dd></div>)}</dl><p>Comprueba que los datos sean correctos. {editing ? 'Al guardar se te pedirá confirmar los cambios.' : 'Pulsa Registrar empleado cuando todo esté listo.'}</p></section>
+        </aside>
+        </div>
+        <div className="employee-registration-footer">{error && <p className="employee-save-error" role="alert">{error}</p>}<div className="employee-footer-message"><span><Icon name="file" size={20} /></span><div><strong>{editing ? 'Guardar los cambios del perfil' : 'Crear perfil de empleado'}</strong><p>Los campos con <b>*</b> son obligatorios.</p></div></div><div className="employee-footer-actions"><button className={`${secondaryClass} px-5 py-3`} disabled={busy} type="button" onClick={() => { setForm(emptyForm()); setEditing(null); openDirectory() }}>Cancelar</button><button className={`${buttonClass} px-5 py-3`} disabled={busy || catalogLoading || Boolean(catalogError)} type="button" onClick={event => { if (event.currentTarget.form?.reportValidity()) void save(); else setError('Revisa los campos obligatorios y el formato de los datos marcados antes de guardar.') }}>{busy ? 'Guardando, espera un momento…' : editing ? 'Confirmar y guardar cambios' : 'Registrar empleado'}</button></div></div>
       </form>
-    </Panel>}
-    {detail && <Panel title={`${detail.givenNames} ${detail.familyNames}`} subtitle={roleName(detail.role)}><dl className="grid grid-cols-1 gap-3 text-xs sm:grid-cols-2">{[['Código',detail.employeeCode],['Correo',detail.email],['Teléfono',detail.phone],['Fecha de nacimiento',detail.birthDate],['Ciudad',detail.city],['Estado',detail.active ? 'Activo' : 'Inactivo'],['Especialidades',catalogs.specialties.filter(s => detail.specialties.includes(s.id)).map(s => s.name).join(', ')]].map(([label,value]) => <div key={label}><dt className="text-slate-400">{label}</dt><dd className="mt-1 text-slate-700">{value || '—'}</dd></div>)}</dl><button className={`${secondaryClass} mt-4`} onClick={() => setDetail(null)} type="button">Cerrar detalles</button></Panel>}
-    <Panel title="Directorio de personal" subtitle={`${total} empleados · 50 por página`}>
-      <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-[1fr_180px_180px]">
-        <input aria-label="Buscar empleados" className={inputClass} placeholder="Nombre, correo o código..." value={query} onChange={e => { setQuery(e.target.value); setOffset(0) }} />
-        <select aria-label="Filtrar por rol" className={inputClass} value={role} onChange={e => { setRole(e.target.value); setOffset(0) }}><option value="">Todos los roles</option><option value="doctor">Doctores</option><option value="receptionist">Recepcionistas</option></select>
-        <select aria-label="Filtrar por estado" className={inputClass} value={status} onChange={e => { setStatus(e.target.value); setOffset(0) }}><option value="">Todos los estados</option><option value="active">Activos</option><option value="inactive">Inactivos</option></select>
+    </section>}
+    {view === 'directory' && <section className="employee-directory-panel" aria-labelledby="employee-directory-title">
+      <header className="employee-directory-heading"><span className="employee-directory-emblem"><Icon name="users" size={25} /></span><div><small>DIRECTORIO DEL HOSPITAL</small><h2 id="employee-directory-title">Empleados registrados</h2><p>Todos los perfiles de tu equipo, en un solo lugar.</p></div><span className="employee-directory-total"><strong>{total}</strong>{query || role || status ? 'coincidencias' : 'empleados'}</span></header>
+      {!catalogLoading && !canChangeState && <p className="employee-contract-notice" role="status"><Icon name="help" size={17} />La conexión aún no confirma el bloqueo de acceso al desactivar. Ver ficha y Editar están disponibles; actualizar el servicio habilitará la gestión completa de acceso.</p>}
+      <div className="employee-directory-filters"><label className="employee-directory-search"><span>Buscar empleado</span><div><Icon name="search" size={19} /><input placeholder="Nombre, correo o código…" value={query} onChange={e => { setQuery(e.target.value); setOffset(0) }} /></div></label>
+        <label>Cargo<select value={role} onChange={e => { setRole(e.target.value); setOffset(0) }}><option value="">Todos los cargos</option><option value="doctor">Doctores</option><option value="receptionist">Recepcionistas</option></select></label>
+        <label>Estado<select value={status} onChange={e => { setStatus(e.target.value); setOffset(0) }}><option value="">Todos los estados</option><option value="active">Activos</option><option value="inactive">Inactivos</option></select></label>
+        {(query || role || status) && <button type="button" className="employee-clear-filters" onClick={() => { setQuery(''); setRole(''); setStatus(''); setOffset(0) }}>Limpiar filtros</button>}
       </div>
-      {loading ? <p className="py-8 text-center text-xs text-slate-500" role="status">Cargando personal...</p> : <div className="overflow-x-auto"><table className="w-full min-w-[760px] text-left text-xs"><thead><tr className="border-b border-slate-100 text-slate-400">{['Empleado','Código','Rol','Estado','Acciones'].map(h => <th className="pb-3 font-medium" key={h}>{h}</th>)}</tr></thead><tbody className="divide-y divide-slate-50">{employees.map(employee => <tr key={employee.id}><td className="py-3"><p className="font-semibold text-slate-700">{employee.givenNames} {employee.familyNames}</p><p className="mt-1 text-[11px] text-slate-400">{employee.email}</p></td><td>{employee.employeeCode}</td><td>{roleName(employee.role)}</td><td><span className={`rounded-full px-2 py-1 text-[10px] ${employee.active ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-600'}`}>{employee.active ? 'Activo' : 'Inactivo'}</span></td><td><div className="flex gap-2"><button className={secondaryClass} disabled={busy} onClick={() => void run('detail', { id: employee.id })} type="button">Detalles</button><button className={secondaryClass} disabled={busy} onClick={() => openEdit(employee)} type="button">Editar</button>{onSchedule && <button className={secondaryClass} disabled={busy} onClick={() => onSchedule(employee.id)} type="button">Horarios</button>}<button className={secondaryClass} disabled={busy} onClick={() => void run('state', { id: employee.id, active: !employee.active, staffVersion: employee.staffVersion })} type="button">{employee.active ? 'Desactivar' : 'Activar'}</button></div></td></tr>)}{!employees.length && <tr><td colSpan={5} className="py-8 text-center text-slate-400">No se encontraron empleados.</td></tr>}</tbody></table></div>}
-      <div className="mt-4 flex items-center justify-between"><button className={secondaryClass} disabled={loading || busy || offset === 0} onClick={() => setOffset(o => Math.max(0,o-50))} type="button">Anterior</button><button className={secondaryClass} disabled={loading || busy} onClick={() => setRevision(r => r+1)} type="button">Actualizar</button><button className={secondaryClass} disabled={loading || busy || offset+50 >= total} onClick={() => setOffset(o => o+50)} type="button">Siguiente</button></div>
-    </Panel>
-    {pending.length > 0 && <Panel title="Altas pendientes de completar" subtitle="Estas solicitudes todavía no se confirmaron. Las cuentas pendientes no tienen permisos hospitalarios."><ul className="space-y-3">{pending.map(p => <li key={p.id} className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-50 pb-2 text-xs"><span className="text-slate-600">{p.email}</span><div className="flex gap-2"><button className={secondaryClass} disabled={busy} onClick={() => { setEditing(null); setForm({ ...p.payload, requestId: p.id, password: '' }); setNotice('Corrige los datos y guarda para reanudar el alta sin crear otra cuenta.'); setError('') }} type="button">Revisar solicitud</button><button className={buttonClass} disabled={busy} onClick={() => void run('recover',{ requestId:p.id })} type="button">Reanudar alta</button></div></li>)}</ul></Panel>}
+      {loading ? <div className="employee-directory-empty" role="status"><Icon name="users" size={30} /><p>Cargando el equipo del hospital…</p></div> : <div className="employee-directory-table-wrap"><table className="employee-directory"><caption className="sr-only">Directorio de empleados, cargos, contacto y acciones</caption><thead><tr>{['Empleado', 'Perfil profesional', 'Contacto', 'Estado', 'Gestionar'].map(label => <th scope="col" key={label}>{label}</th>)}</tr></thead>
+        <tbody>{employees.map(employee => <tr key={employee.id}>
+          <td data-label="Empleado"><div className="employee-directory-person"><span className="employee-directory-avatar" aria-hidden="true">{`${employee.givenNames.charAt(0)}${employee.familyNames.charAt(0)}`.toLocaleUpperCase()}</span><div><strong>{employee.givenNames} {employee.familyNames}</strong><span className="employee-directory-code">Código {employee.employeeCode}</span></div></div></td>
+          <td data-label="Perfil profesional"><span className={`employee-directory-role ${employee.role}`}><Icon name={employee.role === 'doctor' ? 'patient' : 'users'} size={14} />{roleName(employee.role)}</span>{employee.role === 'doctor' && <div className="employee-directory-specialties">{catalogs.specialties.filter(specialty => employee.specialties.includes(specialty.id)).map(specialty => <span key={specialty.id}>{specialty.name}</span>)}{!employee.specialties.length && <small>Sin especialidades asignadas</small>}</div>}</td>
+          <td data-label="Contacto"><div className="employee-directory-contact"><span><Icon name="mail" size={14} />{employee.email}</span><small>{employee.phone || 'Sin teléfono registrado'}</small></div></td>
+          <td data-label="Estado"><span className={`employee-directory-status ${employee.active ? 'is-active' : ''}`}><i />{employee.active ? 'Activo' : 'Inactivo'}</span></td>
+          <td data-label="Gestionar"><div className="employee-directory-actions" role="group" aria-label={`Acciones de ${employee.givenNames} ${employee.familyNames}`}><EmployeeActionButton action="view" label="Ver ficha" disabled={busy} onClick={() => void run('detail', { id: employee.id })} /><EmployeeActionButton action="edit" label="Editar empleado" disabled={busy} onClick={() => void openEdit(employee)} /><EmployeeActionButton action={employee.active ? 'disable' : 'enable'} label={employee.active ? 'Desactivar empleado' : 'Reactivar empleado'} disabled={busy} onClick={() => void openEmployeeState(employee)} /></div></td>
+        </tr>)}</tbody></table>{!employees.length && <div className="employee-directory-empty"><Icon name="search" size={30} /><h3>{query || role || status ? 'No hay coincidencias' : 'Tu equipo empieza aquí'}</h3><p>{query || role || status ? 'Prueba con otro nombre o ajusta los filtros.' : 'Los empleados que registres aparecerán en este directorio.'}</p></div>}</div>}
+      <footer className="employee-directory-pagination"><span>{total ? `${Math.min(offset + 1, total)}–${Math.min(offset + employees.length, total)} de ${total} empleados` : '0 empleados'} · 50 por página</span><div><button className={secondaryClass} disabled={loading || busy || offset === 0} onClick={() => setOffset(value => Math.max(0, value - 50))} type="button">Anterior</button><button className={secondaryClass} disabled={loading || busy} onClick={() => setRevision(value => value + 1)} type="button">Actualizar</button><button className={secondaryClass} disabled={loading || busy || offset + 50 >= total} onClick={() => setOffset(value => value + 50)} type="button">Siguiente</button></div></footer>
+    </section>}
+    {view === 'directory' && pending.length > 0 && <Panel title="Altas pendientes de completar" subtitle="Estas solicitudes todavía no se confirmaron. Las cuentas pendientes no tienen permisos hospitalarios."><ul className="space-y-3">{pending.map(p => <li key={p.id} className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-50 pb-2 text-xs"><span className="text-slate-600">{p.email}</span><div className="flex gap-2"><button className={secondaryClass} disabled={busy} onClick={() => { setView('register'); setDetail(null); setEditing(null); setForm({ ...p.payload, phone: formatEmployeePhone(p.payload.phone), requestId: p.id }); setNotice('Corrige los datos y guarda para reanudar el alta sin crear otra cuenta.'); setError('') }} type="button">Revisar solicitud</button><button className={buttonClass} disabled={busy} onClick={() => void run('recover',{ requestId:p.id })} type="button">Reanudar alta</button></div></li>)}</ul></Panel>}
   </div>
 }
