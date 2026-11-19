@@ -22,3 +22,6 @@ export function validEmployeeBirthDate(value: string, today: string) {
   const date = new Date(`${value}T12:00:00Z`)
   return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value
 }
+export function temporaryEmployeePassword() {
+  return 'Gaby.0522123'
+}

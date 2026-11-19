@@ -12,6 +12,7 @@ export interface AttentionRequest {
 export interface ReceptionPatient {
   id: string; profile_id: string | null; first_name: string; last_name: string
   email?: string | null; city?: string | null; patient_code: string; dui: string | null; birth_date: string | null; phone: string | null
+  registration_source?: string; created_at?: string
 }
 export interface Slot {
   doctor_id: string; doctor_name: string; consulting_room_id: string; room_code: string
@@ -39,7 +40,7 @@ function rpcError(error: { code?: string; message: string }) {
 }
 export async function receptionRpc<T = unknown>(name: string, args: Record<string, unknown>): Promise<T> {
   const { data, error } = await client().rpc(name, args)
-  if (error) throw Object.assign(rpcError(error), { code: error.code })
+  if (error) throw Object.assign(rpcError(error), { code: error.code, hint: error.hint })
   return data as T
 }
 export async function receptionRows<T>(table: string, columns: string): Promise<T[]> {
@@ -69,7 +70,16 @@ export interface ReceptionPatientMatch extends ReceptionPatient {
   record_code: string | null
   record_id: string | null
 }
-const patientSearchColumns = 'id,profile_id,first_name,last_name,patient_code,dui,birth_date,phone,email,city,medical_records(id,record_code)'
+const patientSearchColumns = 'id,profile_id,first_name,last_name,patient_code,dui,birth_date,phone,email,city,registration_source,created_at,medical_records(id,record_code)'
+
+export async function readWalkinRegistration(id: string): Promise<ReceptionPatientMatch> {
+  const { data, error } = await client().from('patients').select(patientSearchColumns).eq('id',id).single()
+  if(error || !data) throw new Error('No se pudo confirmar el paciente guardado. Búscalo antes de volver a registrar.')
+  const embedded=data.medical_records
+  const records=Array.isArray(embedded)?embedded:embedded?[embedded]:[]
+  if(records.length!==1 || !records[0]?.record_code) throw new Error('No se confirmó un expediente único para este paciente. Solicita revisión; no crees otra persona.')
+  return {...data,record_id:records[0].id,record_code:records[0].record_code} as ReceptionPatientMatch
+}
 
 export async function searchReceptionPatients(value: string, signal?: AbortSignal): Promise<{ patients: ReceptionPatientMatch[]; hasMore: boolean }> {
   const term = searchText(value)

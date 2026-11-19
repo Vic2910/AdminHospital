@@ -1,6 +1,7 @@
 import type { IconName } from '../types'
 
 const iconPaths: Record<IconName, string> = {
+  pencil: 'm16 4 4 4M4 20l4-1L20 7a2.8 2.8 0 0 0-4-4L4 15l-1 6Z',
   grid: 'M3 3h7v7H3zM14 3h7v7h-7zM14 14h7v7h-7zM3 14h7v7H3z',
   users: 'M16 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2m12-13a4 4 0 0 1 0 8m4 5v-2a4 4 0 0 0-3-3.87M10 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z',
   patient: 'M12 8v8m-4-4h8m-4 9a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z',

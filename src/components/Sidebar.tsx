@@ -37,7 +37,7 @@ export function Sidebar({
   )
 
   return (
-    <aside className="flex w-full shrink-0 flex-col bg-[#800b2c] text-white md:sticky md:top-0 md:h-screen md:w-[230px]">
+    <aside className="hospital-sidebar flex w-full shrink-0 flex-col bg-[#800b2c] text-white md:sticky md:top-0 md:h-screen md:w-[230px]">
       <div className="flex min-h-[88px] flex-col items-center justify-center gap-1 border-b border-white/10 px-3 py-3 text-center">
         <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/10">
           <Icon name="plus" size={20} />

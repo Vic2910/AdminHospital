@@ -9,6 +9,7 @@ export interface ScheduleGroup {
   key: string; kind: 'shift' | 'consultation' | 'absence'; staffId: string; active: boolean
   dates: string[]; start: string; end: string; shiftType: string; reason: string
   consultations: MedicalInput[]; breaks: BreakInput[]; originals: OriginalPeriod[]
+  recurringId?: string
 }
 export function toggleDay(days: number[], day: number): number[] {
   return [...new Set(days.includes(day) ? days.filter(d => d !== day) : [...days, day])].sort((a, b) => a - b)
@@ -32,9 +33,9 @@ export function savedScheduleGroups(data: PlanningData): ScheduleGroup[] {
     const pauses = breaks.map(b => ({ start: clock(b.starts_at), end: clock(b.ends_at), reason: b.reason?.replace(/^Descanso:\s*/, '') ?? '' }))
     const shiftType = 'shift_type' in row ? row.shift_type : 'ordinario'
     const reason = 'reason' in row ? row.reason ?? '' : ''
-    const key = JSON.stringify([kind, staffId, active, start, end, shiftType, reason, consultations, pauses])
+    const key = JSON.stringify([kind, staffId, active, start, end, shiftType, reason, consultations, pauses, row.recurring_id ?? null])
     let group = groups.get(key)
-    if (!group) { group = { key, kind, staffId, active, dates: [], start, end, shiftType, reason, consultations, breaks: pauses, originals: [] }; groups.set(key, group) }
+    if (!group) { group = { key, kind, staffId, active, dates: [], start, end, shiftType, reason, consultations, breaks: pauses, originals: [], recurringId: row.recurring_id }; groups.set(key, group) }
     group.dates.push(hospitalDate(row.starts_at))
     const date = hospitalDate(row.starts_at)
     group.originals.push({ kind, id: row.id, version: row.version, date })
@@ -45,8 +46,8 @@ export function savedScheduleGroups(data: PlanningData): ScheduleGroup[] {
   const absences = data.saved_absences ?? data.absences
   for (const row of data.saved_shifts ?? data.shifts) {
     const active = row.status !== 'cancelado'
-    const medical = consultations.filter(m => m.doctor_id === row.staff_id && m.active === active && inside(m, row)).sort((a, b) => a.starts_at.localeCompare(b.starts_at))
-    const breaks = absences.filter(b => b.staff_id === row.staff_id && b.active === active && b.reason?.startsWith('Descanso:') && inside(b, row)).sort((a, b) => a.starts_at.localeCompare(b.starts_at))
+    const medical = consultations.filter(m => m.doctor_id === row.staff_id && m.active === active && (m.recurring_id ?? null) === (row.recurring_id ?? null) && inside(m, row)).sort((a, b) => a.starts_at.localeCompare(b.starts_at))
+    const breaks = absences.filter(b => b.staff_id === row.staff_id && b.active === active && (b.recurring_id ?? null) === (row.recurring_id ?? null) && b.reason?.startsWith('Descanso:') && inside(b, row)).sort((a, b) => a.starts_at.localeCompare(b.starts_at))
     add('shift', row.staff_id, row, active, medical, breaks)
   }
   for (const row of consultations) if (!assigned.has(row.id)) add('consultation', row.doctor_id, row, row.active, [row])

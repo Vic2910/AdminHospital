@@ -30,7 +30,7 @@ function harness(options = {}) {
   } }
   const sql = { begin: async callback => {
     const state = structuredClone(persisted)
-    await callback(async (parts, ...values) => {
+    const tx = async (parts, ...values) => {
       const query = parts.join('?').replace(/\s+/g, ' ').trim()
       if (query.startsWith('select set_config') || query.includes('pg_advisory_xact_lock')) return []
       if (query.includes('user_roles') && query.endsWith('for share')) return options.revoked ? [] : [{ user_id: caller }]
@@ -50,7 +50,7 @@ function harness(options = {}) {
       else if (query.startsWith('select public.set_employee_role')) state.rolesActive = values[2]
       else if (query.startsWith('update public.user_roles')) {
         if (query.includes('set active=true')) {
-          const restore = JSON.parse(values[1])
+          const restore = values[1]
           state.roles = state.roles.map(role => restore.includes(role.role) ? { ...role, active: true } : role)
         } else state.roles = state.roles.map(role => role.role !== 'paciente' ? { ...role, active: false } : role)
         state.rolesActive = state.roles.find(role => role.role === 'doctor').active
@@ -61,14 +61,19 @@ function harness(options = {}) {
       else if (query.startsWith('update auth.users')) {
         if (query.includes("'employee_deleted'")) { state.deleted = true; state.banned = true }
         else if (query.includes("'employee_access_disabled',true")) {
-          state.metadata = { employee_access_roles: JSON.parse(values[0]), employee_access_disabled: true, employee_access_previous_ban: state.metadata.employee_access_disabled ? state.metadata.employee_access_previous_ban : state.bannedUntil, employee_access_ban_until: '2126-11-18T00:00:00Z' }
+          state.metadata = { employee_access_roles: values[0], employee_access_disabled: true, employee_access_previous_ban: state.metadata.employee_access_disabled ? state.metadata.employee_access_previous_ban : state.bannedUntil, employee_access_ban_until: '2126-11-18T00:00:00Z' }
           state.bannedUntil = state.metadata.employee_access_ban_until; state.banned = true
         } else { state.bannedUntil = state.metadata.employee_access_previous_ban; state.metadata = {}; state.banned = false }
       }
       else if (query.startsWith('insert into public.audit_logs')) { if (options.auditFailure) throw new Error('Simulated rollback') }
       else throw new Error(`Unexpected SQL in scoped test: ${query}`)
       return []
-    })
+    }
+    tx.json = value => {
+      assert.ok(Array.isArray(value), 'Role grants must be encoded as a JSON array, never a JSON string')
+      return value
+    }
+    await callback(tx)
     persisted = state
   } }
   const context = vm.createContext({ Request, Response, Intl, Date, testServices: { validation, employeeContract, createClient: () => authAdmin, postgres: () => sql }, Deno: { env: { get: () => 'in-memory' }, serve: value => { handler = value } } })

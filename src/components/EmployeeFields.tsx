@@ -41,14 +41,14 @@ export function EmployeeTextField({ label, symbol, hint, ...props }: InputHTMLAt
   return <label className="employee-field"><span className="employee-field-label">{label}{props.required && <span aria-hidden="true"> *</span>}</span><span className="employee-field-control"><span className="employee-field-symbol" aria-hidden="true"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d={paths[symbol]} /></svg></span><input {...props} /></span>{hint && <small className="employee-hint">{hint}</small>}</label>
 }
 
-export function EmployeeCity({ value, onChange, className }: { value: string; onChange: (value: string) => void; className: string }) {
+export function EmployeeCity({ value, onChange, className, inputId, invalid = false, strict = false }: { value: string; onChange: (value: string) => void; className: string; inputId?: string; invalid?: boolean; strict?: boolean }) {
   const id = useId()
   const [open, setOpen] = useState(false)
   const [index, setIndex] = useState(-1)
   const matches = searchLocalities(value)
   function choose(item: typeof localities[number]) { onChange(item.name); setOpen(false); setIndex(-1) }
   return <div className="employee-combobox" onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false) }}>
-    <div className="employee-field-control"><span className="employee-field-symbol" aria-hidden="true"><Icon name="search" size={19} /></span><input aria-label="Ciudad o distrito" placeholder="Busca tu ciudad o distrito" className={className} role="combobox" aria-autocomplete="list" aria-expanded={open} aria-controls={`${id}-options`} aria-activedescendant={open && index >= 0 ? `${id}-${index}` : undefined} autoComplete="off" maxLength={120} value={value}
+    <div className="employee-field-control"><span className="employee-field-symbol" aria-hidden="true"><Icon name="search" size={19} /></span><input id={inputId} aria-invalid={invalid} aria-label="Ciudad o distrito" placeholder="Busca tu ciudad o distrito" className={className} role="combobox" aria-autocomplete="list" aria-expanded={open} aria-controls={`${id}-options`} aria-activedescendant={open && index >= 0 ? `${id}-${index}` : undefined} autoComplete="off" maxLength={120} value={value}
       onFocus={() => setOpen(true)} onChange={event => { onChange(event.target.value); setOpen(true); setIndex(-1) }} onKeyDown={event => {
         if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
           event.preventDefault(); event.stopPropagation(); setOpen(true)
@@ -60,26 +60,26 @@ export function EmployeeCity({ value, onChange, className }: { value: string; on
       }} /></div>
     {open && <ul id={`${id}-options`} role="listbox" aria-label="Distritos de El Salvador" className="employee-city-options">
       {matches.map((item, i) => <li key={`${item.municipality}/${item.name}`} id={`${id}-${i}`} role="option" aria-selected={i === index} className={i === index ? 'selected' : ''} onMouseDown={event => event.preventDefault()} onClick={() => choose(item)}><strong>{item.name}</strong><small>Distrito · {item.municipality} · {item.department}</small></li>)}
-      {!matches.length && <li role="presentation">Sin coincidencias. Puedes conservar la ciudad escrita.</li>}
+      {!matches.length && <li role="presentation">{strict ? 'Sin coincidencias. Prueba otra localidad y selecciona una opción.' : 'Sin coincidencias. Puedes conservar la ciudad escrita.'}</li>}
     </ul>}
     <small className="employee-hint">Selecciona una localidad de El Salvador.</small>
   </div>
 }
 
 const months = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre']
-export function EmployeeBirthDate({ value, onChange, today, className }: { value: string; onChange: (value: string) => void; today: string; className: string }) {
+export function EmployeeBirthDate({ value, onChange, today, className, inputId, invalid = false }: { value: string; onChange: (value: string) => void; today: string; className: string; inputId?: string; invalid?: boolean }) {
   const [open, setOpen] = useState(false)
   const [year, setYear] = useState(Number(value.slice(0, 4)) || Number(today.slice(0, 4)) - 30)
-  const [month, setMonth] = useState(Number(value.slice(5, 7)) - 1 || 0)
+  const [month, setMonth] = useState(value ? Math.max(0, Number(value.slice(5, 7)) - 1) : Number(today.slice(5, 7)) - 1)
   const input = useRef<HTMLInputElement>(null)
   const id = useId()
   const display = /^\d{4}-\d{2}-\d{2}$/.test(value) ? value.split('-').reverse().join('/') : value
   const days = new Date(year, month + 1, 0).getDate()
   return <div className="employee-date" onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false) }} onKeyDown={event => { if (event.key === 'Escape') { setOpen(false); input.current?.focus() } }}>
-    <div className="employee-date-entry employee-field-control"><span className="employee-field-symbol" aria-hidden="true"><Icon name="calendar" size={19} /></span><input ref={input} aria-label="Fecha de nacimiento" aria-describedby={`${id}-hint`} className={className} placeholder="DD / MM / AAAA" inputMode="numeric" maxLength={10} value={display} onChange={event => {
+    <div className="employee-date-entry employee-field-control"><span className="employee-field-symbol" aria-hidden="true"><Icon name="calendar" size={19} /></span><input ref={input} id={inputId} aria-invalid={invalid} aria-label="Fecha de nacimiento" aria-describedby={`${id}-hint`} className={className} placeholder="DD / MM / AAAA" inputMode="numeric" maxLength={10} value={display} onChange={event => {
       const raw = event.target.value
       onChange(/^\d{2}\/\d{2}\/\d{4}$/.test(raw) ? raw.split('/').reverse().join('-') : raw)
-    }} /><button type="button" aria-label="Abrir calendario de nacimiento" aria-expanded={open} aria-controls={`${id}-calendar`} onClick={() => setOpen(!open)}><Icon name="chevron" size={16} /></button></div>
+    }} /><button type="button" aria-label="Abrir calendario de nacimiento" aria-expanded={open} aria-controls={`${id}-calendar`} onClick={() => { if (!open && /^\d{4}-\d{2}-\d{2}$/.test(value)) { setYear(Number(value.slice(0,4))); setMonth(Number(value.slice(5,7))-1) }; setOpen(!open) }}><Icon name="chevron" size={16} /></button></div>
     <small id={`${id}-hint`} className="employee-hint">Escribe la fecha o abre el calendario.</small>
     {open && <div id={`${id}-calendar`} className="employee-calendar" role="group" aria-label="Calendario de nacimiento">
       <div className="employee-calendar-selects"><select aria-label="Mes de nacimiento" value={month} onChange={event => setMonth(Number(event.target.value))}>{months.map((name, i) => <option key={name} value={i}>{name}</option>)}</select>

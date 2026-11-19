@@ -1,35 +1,33 @@
 import { createClient } from 'npm:@supabase/supabase-js@2.118.0'
 import postgres from 'npm:postgres@3.4.7'
 import { employeeContract } from './contract.ts'
-import { validEmployeeBirthDate, validEmployeePhone, formatEmployeePhone, nextEmployeeCode } from './validation.ts'
-
-// Política de contraseña inicial solicitada por el hospital. Solo se aplica a altas nuevas.
-const INITIAL_EMPLOYEE_PASSWORD = 'Gaby.0522123'
+import { validEmployeeBirthDate, validEmployeePhone, formatEmployeePhone, nextEmployeeCode, temporaryEmployeePassword } from './validation.ts'
 
 const headers = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, apikey, content-type, x-client-info', 'Access-Control-Allow-Methods': 'POST, OPTIONS', 'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'X-Employee-Contract': employeeContract.version, 'Access-Control-Expose-Headers': 'X-Employee-Contract' }
 class Failure extends Error { constructor(message: string, public status = 400, public code?: string) { super(message) } }
 const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, { auth: { persistSession: false, autoRefreshToken: false } })
 const sql = postgres(Deno.env.get('SUPABASE_DB_URL')!, { prepare: false, max: 1, idle_timeout: 5, connect_timeout: 10 })
 function check(result: { error: unknown }) { if (result.error) throw new Failure('Supabase rechazó la operación. Revisa los datos o reanuda el alta.', 409) }
-function text(value: unknown, max: number, required = true): string {
-  if (typeof value !== 'string' || value.trim().length > max || (required && !value.trim())) throw new Failure('Completa los campos requeridos con valores válidos.')
+function text(value: unknown, max: number, required = true, field = 'valor solicitado'): string {
+  if (typeof value !== 'string' || (required && !value.trim())) throw new Failure(`Completa el campo ${field} con un valor válido.`,400,'INVALID_FIELD')
+  if (value.trim().length > max) throw new Failure(`El campo ${field} admite como máximo ${max} caracteres.`,400,'INVALID_FIELD')
   return value.trim()
 }
 function validate(b: Record<string, unknown>) {
   const role = b.role
   if (role !== 'doctor' && role !== 'receptionist') throw new Failure('Rol no permitido.')
-  const email = text(b.email, 254).toLowerCase()
+  const email = text(b.email, 254, true, 'correo electrónico').toLowerCase()
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Failure('Correo inválido.')
-  const birthDate = text(b.birthDate ?? '', 10, false)
+  const birthDate = text(b.birthDate ?? '', 10, false, 'fecha de nacimiento')
   if (!validEmployeeBirthDate(birthDate, new Intl.DateTimeFormat('en-CA', { timeZone: 'America/El_Salvador', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date()))) throw new Failure('Fecha de nacimiento inválida. Usa una fecha real entre 1900 y hoy.')
   if (typeof b.active !== 'boolean') throw new Failure('Estado inválido.')
   if (!Array.isArray(b.specialties) || b.specialties.length > 50 || b.specialties.some(x => typeof x !== 'string' || !/^[1-9]\d*$/.test(x))) throw new Failure('Especialidades inválidas.')
   const specialties = [...new Set(b.specialties as string[])]
   if (role === 'doctor' ? !specialties.length : specialties.length) throw new Failure('Selecciona especialidades solamente para doctores.')
-  const rawPhone = text(b.phone, 30)
+  const rawPhone = text(b.phone, 30, true, 'teléfono')
   if (!validEmployeePhone(rawPhone)) throw new Failure('El teléfono debe tener 8 dígitos e iniciar con 2, 5, 6 o 7.')
   const phone = formatEmployeePhone(rawPhone)
-  return { givenNames: text(b.givenNames,100), familyNames: text(b.familyNames,100), email, phone, birthDate, city: text(b.city ?? '',120,false), employeeCode: text(b.employeeCode ?? '',80,false), role, specialties, active: b.active }
+  return { givenNames: text(b.givenNames,100,true,'nombres'), familyNames: text(b.familyNames,100,true,'apellidos'), email, phone, birthDate, city: text(b.city ?? '',120,false,'ciudad'), employeeCode: text(b.employeeCode ?? '',80,false,'código de empleado'), role, specialties, active: b.active }
 }
 type EmployeeQuery = (parts: TemplateStringsArray, ...values: any[]) => Promise<any[]>
 async function directory(id?: string, execute: EmployeeQuery = sql) {
@@ -92,6 +90,7 @@ Deno.serve(async req => {
     let completedEmployeeCode: string | undefined
     let completedStaffId: string | undefined
     let deliverCredentials = false
+    let initialPassword: string | undefined
     let target: string | undefined
     let payload: ReturnType<typeof validate> | undefined
     if (b.action === 'create') {
@@ -103,7 +102,8 @@ Deno.serve(async req => {
         const found = await sql`select id from public.specialties where id=${sp}::bigint and active`
         if (!found.length) throw new Failure('Selecciona especialidades activas.')
       }
-      const created = await admin.auth.admin.createUser({ email: payload.email, password: INITIAL_EMPLOYEE_PASSWORD, email_confirm: true, ban_duration: '876000h', app_metadata: { employee_pending: true, employee_payload: payload, employee_initial_credentials: 'hospital-v1' }, user_metadata: { first_name: payload.givenNames, last_name: payload.familyNames } })
+      initialPassword = temporaryEmployeePassword()
+      const created = await admin.auth.admin.createUser({ email: payload.email, password: initialPassword, email_confirm: true, ban_duration: '876000h', app_metadata: { employee_pending: true, employee_payload: payload, employee_initial_credentials: 'initial-v1' }, user_metadata: { first_name: payload.givenNames, last_name: payload.familyNames } })
       if (created.error) throw new Failure('No se pudo crear la cuenta. El correo puede estar registrado o la contraseña fue rechazada.',409)
       target = created.data.user.id
       deliverCredentials = true
@@ -111,9 +111,12 @@ Deno.serve(async req => {
       const user = await admin.auth.admin.getUserById(text(b.requestId,36)); check(user)
       if (user.data.user?.app_metadata.employee_pending !== true) throw new Failure('Esta cuenta no tiene un alta pendiente.')
       target = user.data.user.id
-      deliverCredentials = user.data.user.app_metadata.employee_initial_credentials === 'hospital-v1'
+      initialPassword = temporaryEmployeePassword()
+      deliverCredentials = true
       payload = validate({ ...(b.values ?? user.data.user.app_metadata.employee_payload), email:user.data.user.email, employeeCode: '' })
-      if (b.values) check(await admin.auth.admin.updateUserById(target,{ app_metadata:{employee_payload:payload} }))
+      // Recovery only targets a still-blocked pending account. Rotate its initial secret;
+      // completed accounts never enter this path and retain their existing passwords.
+      check(await admin.auth.admin.updateUserById(target,{ password:initialPassword, app_metadata:{employee_payload:payload,employee_initial_credentials:'initial-v1'} }))
     }
     try {
       await sql.begin(async tx => {
@@ -198,7 +201,7 @@ Deno.serve(async req => {
             } else {
               await tx`update auth.users set raw_app_meta_data=coalesce(raw_app_meta_data,'{}'::jsonb)||jsonb_build_object(
                 'employee_access_disabled',true,
-                'employee_access_roles',${JSON.stringify(metadata.employee_access_disabled === true ? (Array.isArray(metadata.employee_access_roles) ? metadata.employee_access_roles : [...new Set([staff.category, ...roles.filter(row => row.active && row.role !== 'paciente').map(row => row.role)])]) : roles.filter(row => row.active && row.role !== 'paciente').map(row => row.role))}::jsonb,
+                'employee_access_roles',${tx.json(metadata.employee_access_disabled === true ? (Array.isArray(metadata.employee_access_roles) ? metadata.employee_access_roles : [...new Set([staff.category, ...roles.filter(row => row.active && row.role !== 'paciente').map(row => row.role)])]) : roles.filter(row => row.active && row.role !== 'paciente').map(row => row.role))}::jsonb,
                 'employee_access_previous_ban',case when raw_app_meta_data->>'employee_access_disabled'='true' then raw_app_meta_data->'employee_access_previous_ban' else to_jsonb(banned_until) end,
                 'employee_access_ban_until',greatest(coalesce(banned_until,now()),now()+interval '100 years')),
                 banned_until=greatest(coalesce(banned_until,now()),now()+interval '100 years'),updated_at=now() where id=${staff.profile_id}`
@@ -210,7 +213,7 @@ Deno.serve(async req => {
                 ? [...new Set(metadata.employee_access_roles)].filter(role => typeof role === 'string' && role !== 'admin' && role !== 'paciente')
                 : [staff.category]
               if (!restore.includes(staff.category)) throw new Failure('La autorización guardada no incluye el cargo del empleado. Revisa sus permisos.',409)
-              await tx`update public.user_roles set active=true where user_id=${staff.profile_id} and role::text in (select jsonb_array_elements_text(${JSON.stringify(restore)}::jsonb))`
+              await tx`update public.user_roles set active=true where user_id=${staff.profile_id} and role::text in (select jsonb_array_elements_text(${tx.json(restore)}::jsonb))`
             } else {
               // RLS checks the current database role and staff flag, not the old JWT claims.
               // Revoking all labor roles therefore covers previously issued sessions too.
@@ -254,7 +257,7 @@ Deno.serve(async req => {
       if (error instanceof Failure) throw error
       throw new Failure('No se pudo completar la operación. Actualiza el directorio y vuelve a intentarlo.',409)
     }
-    return reply({ success:true, ...(savedEmployee ? { employee: savedEmployee } : {}), ...(completedStaffId ? { staffId: completedStaffId, employeeCode: completedEmployeeCode } : {}), ...(deliverCredentials && payload ? { credentials: { email: payload.email, password: INITIAL_EMPLOYEE_PASSWORD }, employee: { givenNames: payload.givenNames, familyNames: payload.familyNames, role: payload.role, active: payload.active } } : {}) })
+    return reply({ success:true, ...(savedEmployee ? { employee: savedEmployee } : {}), ...(completedStaffId ? { staffId: completedStaffId, employeeCode: completedEmployeeCode } : {}), ...(deliverCredentials && payload && initialPassword ? { credentials: { email: payload.email, password: initialPassword }, employee: { givenNames: payload.givenNames, familyNames: payload.familyNames, role: payload.role, active: payload.active } } : {}) })
   } catch (error) {
     return new Response(JSON.stringify({ error:error instanceof Failure ? error.message : 'No se pudo procesar la solicitud.', ...(error instanceof Failure && error.code ? { code: error.code } : {}) }),{ status:error instanceof Failure ? error.status : 500,headers })
   }

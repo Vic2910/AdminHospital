@@ -51,7 +51,7 @@ export function ReceptionPatientDirectory({ onStartRegistration, onSelectPatient
   </section>
 }
 
-function PatientRecordDialog({ patient, onClose }: { patient: ReceptionPatientMatch; onClose: () => void }) {
+export function PatientRecordDialog({ patient, onClose }: { patient: ReceptionPatientMatch; onClose: () => void }) {
   const dialog = useRef<HTMLDialogElement>(null)
   const [record, setRecord] = useState<Awaited<ReturnType<typeof readReceptionRecord>> | null>(null)
   const [error, setError] = useState('')
