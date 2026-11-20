@@ -8,11 +8,11 @@ import { editableJourney } from '../lib/recurringJourney'
 import { Panel } from '../components/ui'
 import { StaffScheduleSearch } from '../components/StaffScheduleSearch'
 import { StaffWeekCalendar } from '../components/StaffWeekCalendar'
-import { findScheduleStaff, formatStaffTime, scheduleForDate, staffToday, staffWeek } from '../lib/staffWeek'
+import { formatStaffTime, scheduleForDate, staffToday, staffWeek } from '../lib/staffWeek'
 import { Icon } from '../components/Icon'
 import './AdminExperience.css'
 import { addDays, monday, weekday } from '../lib/planningDates'
-import { planningWritesEnabled, readPlanning, savePlanning, savePlanningSet, staffName, type PlanningData, type RecurringJourney } from '../lib/planning'
+import { planningWritesEnabled, readPlanning, readStaffSchedule, savePlanning, savePlanningSet, searchPlanningStaff, staffName, type PlanningData, type PlanningStaff, type RecurringJourney } from '../lib/planning'
 import { savedScheduleGroups, scheduleDates, toggleDay, type BreakInput, type MedicalInput, type OriginalPeriod, type ScheduleGroup, type StaffRole } from '../lib/planningGroups'
 
 const input = 'mt-1.5 w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-[#870b30] focus:ring-2 focus:ring-[#870b30]/10'
@@ -38,6 +38,9 @@ export function StaffShiftsPage({ initialStaffId = '' }: { initialStaffId?: stri
   const [data, setData] = useState<PlanningData>(empty)
   const [employee, setEmployee] = useState(initialStaffId)
   const [query, setQuery] = useState('')
+  const [matches, setMatches] = useState<PlanningStaff[]>([])
+  const [searchLoading, setSearchLoading] = useState(false)
+  const [searchError, setSearchError] = useState('')
   const [recurringId, setRecurringId] = useState<string | null>(null)
   const [recurringClose, setRecurringClose] = useState(false)
   const [recurringEditOpen, setRecurringEditOpen] = useState(false)
@@ -59,13 +62,19 @@ export function StaffShiftsPage({ initialStaffId = '' }: { initialStaffId?: stri
     async function load() {
       setLoading(true); setError('')
       try {
-        const result = await readPlanning(week)
+        if (view === 'schedule' && !employee) {
+          setData(empty)
+          return
+        }
+        const result = view === 'schedule' ? await readStaffSchedule(week, employee) : await readPlanning(week)
         if (!current) return
         setData(result)
         if (!appliedInitial.current) {
-          const person = result.staff.find(s => s.id === initialStaffId)
-          if (person && (person.category === 'doctor' || person.category === 'recepcionista') && person.roles?.includes(person.category)) setRole(person.category)
-          else setEmployee('')
+          if (initialStaffId) {
+            const person = result.staff.find(s => s.id === initialStaffId)
+            if (person && (person.category === 'doctor' || person.category === 'recepcionista') && person.roles?.includes(person.category)) setRole(person.category)
+            else setEmployee('')
+          }
           appliedInitial.current = true
         }
       } catch (err) { if (current) { setData(previous => ({ ...previous, ready: false, shifts: [], consultations: [], absences: [], saved_shifts: [], saved_consultations: [], saved_absences: [] })); setError(err instanceof Error ? err.message : 'No se pudo cargar la programación.') } }
@@ -73,12 +82,25 @@ export function StaffShiftsPage({ initialStaffId = '' }: { initialStaffId?: stri
     }
     void load()
     return () => { current = false }
-  }, [week, revision, initialStaffId, realtime.revision])
+  }, [week, revision, initialStaffId, realtime.revision, view, employee])
+  useEffect(() => {
+    if (view !== 'schedule' || employee || !query.trim()) return
+    let current = true
+    const timer = window.setTimeout(() => {
+      setSearchLoading(true); setSearchError('')
+      void searchPlanningStaff(query, role).then(result => {
+        if (current) setMatches(result)
+      }).catch(err => {
+        if (current) { setMatches([]); setSearchError(err instanceof Error ? err.message : 'No se pudo buscar el personal.') }
+      }).finally(() => { if (current) setSearchLoading(false) })
+    }, 180)
+    return () => { current = false; window.clearTimeout(timer) }
+  }, [view, query, role, employee, realtime.revision])
   const people = data.staff.filter(s => s.category === section && s.roles?.includes(section))
-  const matches = section === 'rooms' ? [] : findScheduleStaff(data.staff, section, query)
   const selectedPerson = people.find(p => p.id === employee)
   const groups = useMemo(() => savedScheduleGroups(data), [data])
-  function selectEmployee(id: string) { setEmployee(id); setDraft(null); setError(''); setNotice('') }
+  function searchEmployees(value: string) { setQuery(value); setMatches([]); setSearchError(''); setSearchLoading(Boolean(value.trim())); if (employee) setEmployee('') }
+  function selectEmployee(id: string) { setEmployee(id); setMatches([]); setSearchLoading(false); setDraft(null); setError(''); setSearchError(''); setNotice('') }
   const allConsultations = data.saved_consultations ?? data.consultations
   const roomCode = (id: string) => data.rooms.find(r => r.id === id)?.code ?? 'Consultorio'
   let dates: string[] = [], previewError = ''
@@ -190,10 +212,10 @@ export function StaffShiftsPage({ initialStaffId = '' }: { initialStaffId?: stri
       <AssignedConsultingRooms data={data} loading={loading} canEdit={canWrite && !busy} onEdit={id => { const room = data.rooms.find(r => r.id === id); if (room) { setError(''); setRoomDraft({ id: room.id, version: room.version, code: room.code, floor: room.floor_id?.toString() ?? '', active: room.active }) } }} />
     </> : <>
       {view === 'schedule' && <section className="staff-selector" aria-labelledby="staff-selector-title">
-        <header><span className="staff-selector-icon"><Icon name="users" size={26} /></span><div><span className="staff-selector-eyebrow">HORARIOS Y TURNOS</span><h2 id="staff-selector-title">Una persona. Toda su semana.</h2><p>Busca por nombre, apellido o código para consultar la jornada del empleado.</p></div></header>
+        <header><span className="staff-selector-icon"><Icon name="users" size={26} /></span><div><span className="staff-selector-eyebrow">HORARIOS Y TURNOS</span><h2 id="staff-selector-title">Una persona. Toda su semana.</h2><p>Busca por nombre, especialidad o cargo. Solo se consulta el horario de la persona seleccionada.</p></div></header>
         <div className="staff-selector-controls">
           <label>Tipo de personal<select value={section} disabled={busy} onChange={e => switchRole(e.target.value as StaffRole)}><option value="doctor">Doctor</option><option value="recepcionista">Recepcionista</option></select></label>
-          <StaffScheduleSearch key={section} matches={matches} query={query} onQuery={setQuery} onSelect={selectEmployee} selectedId={employee} disabled={busy} loading={loading} />
+          <StaffScheduleSearch key={section} matches={matches} query={query} onQuery={searchEmployees} onSelect={selectEmployee} selectedId={employee} disabled={busy} loading={searchLoading} error={searchError} collapseWhenSelected searchRequired />
         </div>
 
         {selectedPerson && <div className="staff-selected-person"><span><Icon name="patient" size={23} /></span><div><strong>{staffName(selectedPerson)}</strong><p>Código {selectedPerson.employee_code} · {section === 'doctor' ? 'Doctor' : 'Recepcionista'}{!selectedPerson.active ? ' · Inactivo' : ''}</p></div><div className="staff-selected-actions"><button className={secondary} disabled={!canWrite || busy || !selectedPerson.active} onClick={() => startForm('absence')}>Registrar ausencia</button></div></div>}

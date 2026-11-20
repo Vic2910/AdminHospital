@@ -6,7 +6,7 @@ import { confirmRecurringScope, confirmRecurringWrite } from './planningPersiste
 // Release control only; database roles and RLS remain the authorization boundary.
 export const planningWritesEnabled = import.meta.env.VITE_STAFF_PLANNING_ENABLED === 'true'
 
-export interface PlanningStaff { id: string; profile_id: string | null; employee_code: string; category: string; active: boolean; first_name: string | null; last_name: string | null; roles: string[] }
+export interface PlanningStaff { id: string; profile_id: string | null; employee_code: string; category: string; active: boolean; first_name: string | null; last_name: string | null; roles: string[]; specialties?: string[] }
 export interface ConsultingRoom { id: string; code: string; floor_id: number | null; active: boolean; version: string }
 export interface Floor { id: number; name: string }
 export interface PlanningPeriod { id: string; starts_at: string; ends_at: string; version: string; recurring_id?: string }
@@ -24,6 +24,20 @@ function connection() { if (!supabase) throw new Error('Falta configurar Supabas
 export async function readPlanning(week: string): Promise<PlanningData> {
   const data = await invokePlanningRpc<PlanningData>(connection(), 'read_staff_planning', { p_from: atMidnight(week), p_until: atMidnight(addDays(week, 7)) })
   if (!data || !Array.isArray(data.staff) || !Array.isArray(data.shifts) || !Array.isArray(data.absences) || !Array.isArray(data.consultations) || !Array.isArray(data.rooms)) throw Object.assign(new Error('read_staff_planning devolvió una respuesta incompatible: faltan empleados, jornadas, descansos o consultorios. [READ_CONTRACT]'), { code: 'READ_CONTRACT' })
+  return data
+}
+export async function searchPlanningStaff(query: string, role: 'doctor' | 'recepcionista'): Promise<PlanningStaff[]> {
+  const staff = await invokePlanningRpc<PlanningStaff[]>(connection(), 'search_planning_staff', { p_query: query, p_role: role, p_limit: 40 })
+  if (!Array.isArray(staff) || staff.some(person => !person.id || !Array.isArray(person.roles) || !Array.isArray(person.specialties))) {
+    throw Object.assign(new Error('search_planning_staff devolvió resultados incompatibles. [READ_CONTRACT]'), { code: 'READ_CONTRACT' })
+  }
+  return staff
+}
+export async function readStaffSchedule(week: string, staffId: string): Promise<PlanningData> {
+  const data = await invokePlanningRpc<PlanningData>(connection(), 'read_staff_schedule', { p_from: atMidnight(week), p_until: atMidnight(addDays(week, 7)), p_staff: staffId })
+  if (!data || data.staff?.length !== 1 || data.staff[0].id !== staffId || !Array.isArray(data.shifts) || !Array.isArray(data.absences) || !Array.isArray(data.consultations) || !Array.isArray(data.rooms)) {
+    throw Object.assign(new Error('read_staff_schedule no devolvió únicamente el horario solicitado. [READ_CONTRACT]'), { code: 'READ_CONTRACT' })
+  }
   return data
 }
 export async function savePlanning(kind: PlanningKind, values: Record<string, unknown>, id?: string, version?: string): Promise<void> {

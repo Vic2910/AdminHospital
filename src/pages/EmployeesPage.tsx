@@ -14,6 +14,7 @@ import { EmployeeCity, EmployeeBirthDate, EmployeeTextField, EmployeeSpecialties
 import { EmployeeCredentials, type InitialCredentials } from '../components/EmployeeCredentials'
 import { formatEmployeePhone, validEmployeePhone, validEmployeeBirthDate } from '../../supabase/functions/manage-employees/validation'
 import { employeeRequest, type EmployeeMutationResult, type Employee, type EmployeeInput, type EmployeeCatalogs, type PendingEmployee } from '../lib/employees'
+import { usePlanningRealtime } from '../lib/usePlanningRealtime'
 
 const inputClass = 'mt-1.5 w-full rounded-md border border-slate-200 bg-[#f8f6f7] px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#870b30]/25'
 const buttonClass = 'rounded-md bg-[#870b30] px-3 py-2 text-xs font-medium text-white hover:bg-[#6f0827] disabled:cursor-not-allowed disabled:opacity-50'
@@ -22,6 +23,7 @@ const emptyForm = (): EmployeeInput => ({ requestId: crypto.randomUUID(), givenN
 const roleName = (role: string) => role === 'doctor' ? 'Doctor' : 'Recepcionista'
 
 export function EmployeesPage({ onSchedule }: { onSchedule?: (staffId?: string) => void }) {
+  const realtime = usePlanningRealtime()
   const [view, setView] = useState<'register' | 'directory'>('register')
   const [stateEmployee, setStateEmployee] = useState<Employee | null>(null)
   const [stateError, setStateError] = useState('')
@@ -57,6 +59,7 @@ export function EmployeesPage({ onSchedule }: { onSchedule?: (staffId?: string) 
     return () => window.clearTimeout(timer)
   }, [credentials])
   const [detail, setDetail] = useState<Employee | null>(null)
+  const detailId = detail?.id
 
   useEffect(() => {
     if (view !== 'directory') return
@@ -71,7 +74,18 @@ export function EmployeesPage({ onSchedule }: { onSchedule?: (staffId?: string) 
       }).finally(() => { if (active) setLoading(false) })
     }, 250)
     return () => { active = false; window.clearTimeout(timer) }
-  }, [query, role, status, offset, revision, view])
+  }, [query, role, status, offset, revision, realtime.revision, view])
+
+  useEffect(() => {
+    if (view !== 'directory' || !detailId) return
+    let active = true
+    employeeRequest<Employee>('detail', { id: detailId }).then(employee => {
+      if (active) setDetail(current => current?.id === detailId ? employee : current)
+    }).catch((err: unknown) => {
+      if (active) setError(err instanceof Error ? err.message : 'No se pudo actualizar la ficha del empleado.')
+    })
+    return () => { active = false }
+  }, [detailId, realtime.revision, view])
 
   useEffect(() => {
     let active = true
@@ -248,6 +262,7 @@ export function EmployeesPage({ onSchedule }: { onSchedule?: (staffId?: string) 
     </section>}
     {view === 'directory' && <section className="employee-directory-panel" aria-labelledby="employee-directory-title">
       <header className="employee-directory-heading"><span className="employee-directory-emblem"><Icon name="users" size={25} /></span><div><small>DIRECTORIO DEL HOSPITAL</small><h2 id="employee-directory-title">Empleados registrados</h2><p>Todos los perfiles de tu equipo, en un solo lugar.</p></div><span className="employee-directory-total"><strong>{total}</strong>{query || role || status ? 'coincidencias' : 'empleados'}</span></header>
+      <p className="employee-contract-notice" role="status"><Icon name="activity" size={17} />{realtime.connected ? 'Directorio sincronizado en tiempo real.' : 'Reconectando; se actualizará automáticamente al recuperar la conexión.'}</p>
       {!catalogLoading && !canChangeState && <p className="employee-contract-notice" role="status"><Icon name="help" size={17} />La conexión aún no confirma el bloqueo de acceso al desactivar. Ver ficha y Editar están disponibles; actualizar el servicio habilitará la gestión completa de acceso.</p>}
       <div className="employee-directory-filters"><label className="employee-directory-search"><span>Buscar empleado</span><div><Icon name="search" size={19} /><input placeholder="Nombre, correo o código…" value={query} onChange={e => { setQuery(e.target.value); setOffset(0) }} /></div></label>
         <label>Cargo<select value={role} onChange={e => { setRole(e.target.value); setOffset(0) }}><option value="">Todos los cargos</option><option value="doctor">Doctores</option><option value="receptionist">Recepcionistas</option></select></label>
