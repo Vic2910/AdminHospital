@@ -3,17 +3,18 @@ import type { AvailabilitySlot, PlanningData, RecurringJourney } from './plannin
 
 interface PlanningReads { read: (week: string) => Promise<PlanningData>; availability: (week: string, doctor: string, room: string) => Promise<AvailabilitySlot[]> }
 function unconfirmed(detail: string) { return Object.assign(new Error(`La RPC aceptó el guardado, pero falta confirmar su lectura en Supabase. ${detail} Reintenta la misma operación. [SAVE_UNCONFIRMED]`), { code: 'SAVE_UNCONFIRMED' }) }
+const closingDate = (journey: RecurringJourney, effective: unknown) => journey.valid_from > String(effective) ? journey.valid_from : String(effective)
 const clock = (value: unknown) => String(value ?? '').slice(0, 5)
 const days = (value: unknown) => Array.isArray(value) ? [...value].map(Number).sort((a, b) => a - b).join(',') : ''
 export async function confirmRecurringScope(read: (week: string) => Promise<PlanningData>, values: Record<string, unknown>, previous: RecurringJourney, scope: { weekday: number | null; originals: RecurringJourney[] }) {
   const snapshot = await read(monday(String(values.valid_from)))
   if (scope.weekday === null) {
     const expected = scope.originals.filter(j => j.active && !j.closed_on && (!j.valid_until || j.valid_until >= String(values.valid_from)))
-    if (expected.some(j => !snapshot.recurring_journeys?.some(saved => saved.id === j.id && saved.closed_on === values.valid_from))) throw unconfirmed('Falta confirmar el historial de la jornada completa.')
+    if (expected.some(j => !snapshot.recurring_journeys?.some(saved => saved.id === j.id && saved.closed_on === closingDate(j, values.valid_from)))) throw unconfirmed('Falta confirmar el historial de la jornada completa.')
   } else {
     const remaining = previous.weekdays.filter(d => d !== scope.weekday)
     if (!remaining.length) return
-    const preserved = snapshot.recurring_journeys?.find(j => j.staff_id === previous.staff_id && j.active && !j.closed_on && j.valid_from === values.valid_from && days(j.weekdays) === days(remaining))
+    const preserved = snapshot.recurring_journeys?.find(j => j.staff_id === previous.staff_id && j.active && !j.closed_on && j.valid_from === closingDate(previous, values.valid_from) && days(j.weekdays) === days(remaining))
     const same = (j: RecurringJourney) => JSON.stringify([clock(j.start_time),clock(j.end_time),j.shift_type,j.breaks,j.consultations,j.consulting_room_id,j.specialty_id,j.valid_until])
     if (!preserved || same(preserved) !== same(previous)) throw unconfirmed('Los otros días no conservaron su configuración original.')
   }
@@ -31,7 +32,7 @@ export async function confirmRecurringWrite(reads: PlanningReads, values: Record
   }
   const normalizePeriods = (value: unknown, medical: boolean) => Array.isArray(value) ? JSON.stringify(value.map(p => ({ start: clock(p.start_time), end: clock(p.end_time), value: medical ? Number(p.slot_minutes) : p.reason }))) : '[]'
   if (saved.valid_from !== values.valid_from || saved.valid_until !== (values.valid_until || null) || saved.closed_on !== null || saved.active !== true || days(saved.weekdays) !== days(values.weekdays) || clock(saved.start_time) !== clock(values.start_time) || clock(saved.end_time) !== clock(values.end_time) || saved.shift_type !== values.shift_type || saved.consulting_room_id !== (values.room_id || null) || saved.specialty_id !== (values.specialty_id || null) || normalizePeriods(saved.breaks, false) !== normalizePeriods(values.breaks, false) || normalizePeriods(saved.consultations, true) !== normalizePeriods(values.consultations, true)) throw unconfirmed('Los días, horas, descansos, consultorio o vigencia leídos no coinciden con lo enviado.')
-  if (previous && !first.recurring_journeys?.some(item => item.id === previous.id && item.staff_id === previous.staff_id && item.closed_on === values.valid_from)) throw unconfirmed('No se pudo confirmar el cierre de vigencia de la versión anterior.')
+  if (previous && !first.recurring_journeys?.some(item => item.id === previous.id && item.staff_id === previous.staff_id && item.closed_on === closingDate(previous, values.valid_from))) throw unconfirmed('No se pudo confirmar el cierre de vigencia de la versión anterior.')
   const futureWeek = !saved.valid_until ? addDays(week, 28) : week
   const checks: Promise<unknown>[] = []
   if (!saved.valid_until) checks.push(reads.read(futureWeek).then(snapshot => {

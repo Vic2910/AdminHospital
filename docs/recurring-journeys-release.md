@@ -1,5 +1,13 @@
 # Jornadas fijas y consultorios permanentes
 
+## Edici?n desde hoy ? 19/11/2026
+
+El formulario inicia en la fecha actual del hospital y permite asignar, editar la jornada completa o editar un d?a desde hoy. Las jornadas futuras tambi?n pueden adelantarse a hoy mediante `recurring_advance_start` (aplicada y definici?n remota verificada). La versi?n sustituida conserva su fecha inicial y se cierra en esa misma fecha con vigencia vac?a; al editar un d?a, los restantes conservan su inicio original. El frontend confirma estas fechas al releer. La desactivaci?n conserva la regla de ma?ana o posterior.
+
+Se aplic? `recurring_same_day_editing` al proyecto `uvebpsbbwofthucghccc` mediante MCP autenticado. Se reley? la definici?n publicada de `save_recurring_journey_scope` y se confirm? que ?nicamente cambiaron el l?mite de fecha (`effective<today`) y su mensaje. Se conservan las validaciones de citas, conflictos, versiones y permisos. No se modificaron empleados ni se realizaron guardados de prueba sobre jornadas reales.
+
+Frontend compilado y 14 pruebas locales aprobadas, con comprobaciones de fecha m?nima e inicial para asignaci?n, jornada completa y d?a. Esto verifica el formulario y la definici?n remota; no certifica un guardado real de empleado ni una publicaci?n del frontend en hosting.
+
 ## Edición recurrente por día — despliegue real
 
 Se aplicó mediante MCP al proyecto `uvebpsbbwofthucghccc` la migración incremental **`recurring_weekday_editing`**, desde `supabase/recurring_weekday_editing.sql`. No se volvió a ejecutar la migración inicial. No se cambiaron políticas RLS ni los contratos antiguos de lectura, disponibilidad, alta y edición por fecha.

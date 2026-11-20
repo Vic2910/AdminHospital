@@ -1,4 +1,5 @@
 import test from 'node:test'
+import { staffToday } from '../src/lib/staffWeek.ts'
 import assert from 'node:assert/strict'
 import { createServer } from 'vite'
 import { createElement } from 'react'
@@ -78,6 +79,7 @@ test('render del formulario: cinco pasos para doctor, recepción sin campos méd
       const data = { ready: true, recurring_ready: true, staff: [{ id: values.staff_id, first_name: 'Empleado', last_name: 'Local', employee_code: 'LOCAL', category: role, roles: [role], active: true }], rooms: [{ id: 'local-room', code: 'LOCAL-01', active: true }], doctor_specialties: [{ doctor_id: values.staff_id, specialty_id: 1, name: 'Especialidad local' }], shifts: [], consultations: [], absences: [], recurring_journeys: [] }
       const html = renderToStaticMarkup(createElement(RecurringJourneyForm, { data, initialEmployee: values.staff_id, initialRole: role, loading: false, onBusy() {}, onSaved() {}, onManage() {} }))
       assert.ok(html.includes('Asignar jornada fija'))
+      assert.ok(html.includes(`min="${staffToday()}" value="${staffToday()}"`))
       assert.ok(html.includes('sin fecha final, hasta que modifiques o desactives'))
       assert.ok(!html.includes('Vigente hasta'))
       assert.ok(html.includes('4:00 PM'))
@@ -86,7 +88,7 @@ test('render del formulario: cinco pasos para doctor, recepción sin campos méd
       assert.equal(html.includes('Consultorio fijo'), role === 'doctor')
       assert.equal(html.includes('Especialidad del doctor'), role === 'doctor')
       assert.equal(html.includes('<b>05</b>'), role === 'doctor')
-      const editing = { ...journey, staff_role: role, weekdays: [1,2,3,4,5,6] }
+      const editing = { ...journey, valid_from: '2099-01-01', staff_role: role, weekdays: [1,2,3,4,5,6] }
       const editingData = { ...data, recurring_journeys: [editing] }
       const day = renderToStaticMarkup(createElement(RecurringJourneyForm, { data: editingData, initialJourney: editing, initialEmployee: values.staff_id, editWeekday: 6, loading: false, onBusy() {}, onSaved() {}, onManage() {} }))
       assert.ok(day.includes('Editar sábado'))
@@ -95,6 +97,7 @@ test('render del formulario: cinco pasos para doctor, recepción sin campos méd
       assert.equal((day.match(/aria-pressed="true"/g) ?? []).length,1)
       const complete = renderToStaticMarkup(createElement(RecurringJourneyForm, { data: editingData, initialJourney: editing, initialEmployee: values.staff_id, loading: false, onBusy() {}, onSaved() {}, onManage() {} }))
       assert.ok(complete.includes('Editar jornada completa'))
+      for (const markup of [day, complete]) assert.ok(markup.includes(`min="${staffToday()}" value="${staffToday()}"`))
       assert.equal((complete.match(/aria-pressed="true"/g) ?? []).length,6)
     }
   } finally { await server.close() }

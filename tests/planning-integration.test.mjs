@@ -65,3 +65,15 @@ test('jornada completa confirma todas las versiones anteriores, incluso después
   await confirmRecurringScope(async () => ({ recurring_journeys: versions }), values, originals[0], { weekday: null, originals })
   await assert.rejects(confirmRecurringScope(async () => ({ recurring_journeys: versions.slice(0,1) }), values, originals[0], { weekday: null, originals }), e => e.code === 'SAVE_UNCONFIRMED')
 })
+
+
+test('adelantar una jornada futura conserva su inicio hist?rico y la vigencia de los otros d?as', async () => {
+  const previous = { ...saved, id: 'future-original', valid_from: '2030-01-10', weekdays: [1,2,3,4,5,6] }
+  const closed = { ...previous, active: false, closed_on: previous.valid_from }
+  const kept = { ...previous, id: 'remaining', weekdays: [1,2,3,4,5] }
+  const final = { recurring_journeys: [saved, closed, kept], shifts: [{ recurring_id: saved.id, staff_id: saved.staff_id, status: 'programado' }] }
+  await confirmRecurringWrite({ read: async () => final, availability: async () => [] }, values, saved.id, previous)
+  await confirmRecurringScope(async () => final, values, previous, { weekday: null, originals: [previous] })
+  await confirmRecurringScope(async () => final, values, previous, { weekday: 6, originals: [previous] })
+  await assert.rejects(confirmRecurringScope(async () => ({ ...final, recurring_journeys: [saved, closed, { ...kept, valid_from: values.valid_from }] }), values, previous, { weekday: 6, originals: [previous] }), e => e.code === 'SAVE_UNCONFIRMED')
+})
