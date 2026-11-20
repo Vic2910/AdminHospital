@@ -1,3 +1,4 @@
+import { addDays } from '../src/lib/planningDates.ts'
 import test from 'node:test'
 import { staffToday } from '../src/lib/staffWeek.ts'
 import assert from 'node:assert/strict'
@@ -79,7 +80,7 @@ test('render del formulario: cinco pasos para doctor, recepción sin campos méd
       const data = { ready: true, recurring_ready: true, staff: [{ id: values.staff_id, first_name: 'Empleado', last_name: 'Local', employee_code: 'LOCAL', category: role, roles: [role], active: true }], rooms: [{ id: 'local-room', code: 'LOCAL-01', active: true }], doctor_specialties: [{ doctor_id: values.staff_id, specialty_id: 1, name: 'Especialidad local' }], shifts: [], consultations: [], absences: [], recurring_journeys: [] }
       const html = renderToStaticMarkup(createElement(RecurringJourneyForm, { data, initialEmployee: values.staff_id, initialRole: role, loading: false, onBusy() {}, onSaved() {}, onManage() {} }))
       assert.ok(html.includes('Asignar jornada fija'))
-      assert.ok(html.includes(`min="${staffToday()}" value="${staffToday()}"`))
+      assert.ok(html.includes(`min="${addDays(staffToday(), 1)}" value="${addDays(staffToday(), 1)}"`))
       assert.ok(html.includes('sin fecha final, hasta que modifiques o desactives'))
       assert.ok(!html.includes('Vigente hasta'))
       assert.ok(html.includes('4:00 PM'))
@@ -101,4 +102,11 @@ test('render del formulario: cinco pasos para doctor, recepción sin campos méd
       assert.equal((complete.match(/aria-pressed="true"/g) ?? []).length,6)
     }
   } finally { await server.close() }
+})
+
+
+test('validación rechaza horas fuera del reloj y días inválidos', () => {
+  assert.notEqual(validateJourney({ ...values, start_time: '29:00' }, false), '')
+  assert.notEqual(validateJourney({ ...values, weekdays: [7] }, false), '')
+  assert.notEqual(validateJourney({ ...values, breaks: [{ start_time: '12:99', end_time: '13:00', reason: 'Pausa' }] }, false), '')
 })

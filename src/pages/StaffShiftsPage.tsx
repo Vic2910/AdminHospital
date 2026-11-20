@@ -1,3 +1,4 @@
+import { usePlanningRealtime } from '../lib/usePlanningRealtime'
 import { AssignedConsultingRooms } from '../components/AssignedConsultingRooms'
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { JourneyEditorDialog } from '../components/JourneyEditorDialog'
@@ -40,6 +41,8 @@ export function StaffShiftsPage({ initialStaffId = '' }: { initialStaffId?: stri
   const [recurringId, setRecurringId] = useState<string | null>(null)
   const [recurringClose, setRecurringClose] = useState(false)
   const [recurringEditOpen, setRecurringEditOpen] = useState(false)
+  const [editDate, setEditDate] = useState<string | null>(null)
+  const realtime = usePlanningRealtime()
   const [editWeekday, setEditWeekday] = useState<number | null>(null)
   const [roomDraft, setRoomDraft] = useState<{ id: string; version: string; code: string; floor: string; active: boolean } | null>(null)
   const [draft, setDraft] = useState<Draft | null>(null)
@@ -70,7 +73,7 @@ export function StaffShiftsPage({ initialStaffId = '' }: { initialStaffId?: stri
     }
     void load()
     return () => { current = false }
-  }, [week, revision, initialStaffId])
+  }, [week, revision, initialStaffId, realtime.revision])
   const people = data.staff.filter(s => s.category === section && s.roles?.includes(section))
   const matches = section === 'rooms' ? [] : findScheduleStaff(data.staff, section, query)
   const selectedPerson = people.find(p => p.id === employee)
@@ -84,19 +87,19 @@ export function StaffShiftsPage({ initialStaffId = '' }: { initialStaffId?: stri
     catch (err) { previewError = err instanceof Error ? err.message : 'Selecciona fechas y días.' }
   }
   function switchRole(next: StaffRole) { setRole(next); setEmployee(''); setQuery(''); setDraft(null); setError(''); setNotice('') }
-  function switchView(next: typeof view) { if (next === 'assign') { setEditWeekday(null); setDraft(null); setRecurringId(editableJourney(data.recurring_journeys ?? [], employee, staffToday())?.id ?? null); setRecurringClose(false) }; setView(next); setError(''); setNotice('') }
-  function manageRecurring(journey: RecurringJourney) { setEditWeekday(null); setRecurringEditOpen(true); setDraft(null); setRecurringId(journey.id); setEmployee(journey.staff_id); setRole(journey.staff_role); setRecurringClose(false) }
+  function switchView(next: typeof view) { if (next === 'assign') { setEditDate(null); setEditWeekday(null); setDraft(null); setRecurringId(editableJourney(data.recurring_journeys ?? [], employee, staffToday())?.id ?? null); setRecurringClose(false) }; setView(next); setError(''); setNotice('') }
+  function manageRecurring(journey: RecurringJourney) { setEditDate(null); setEditWeekday(null); setRecurringEditOpen(true); setDraft(null); setRecurringId(journey.id); setEmployee(journey.staff_id); setRole(journey.staff_role); setRecurringClose(false) }
 
   function editRecurringDay(date: string) {
     const current = (data.recurring_journeys ?? []).filter(j => j.staff_id === employee && j.active && !j.closed_on && (!j.valid_until || j.valid_until >= staffToday()))
-    const journey = current.filter(j => j.weekdays.includes(weekday(date))).sort((a,b) => b.valid_from.localeCompare(a.valid_from))[0] ?? editableJourney(current, employee, staffToday())
+    const journey = current.filter(j => j.weekdays.includes(weekday(date)) && j.valid_from <= date && (!j.valid_until || j.valid_until >= date)).sort((a,b) => b.valid_from.localeCompare(a.valid_from))[0]
     if (!journey) return
-    setRecurringId(journey.id); setRecurringClose(false); setEditWeekday(weekday(date)); setDraft(null); setRecurringEditOpen(true)
+    setEditDate(date); setRecurringId(journey.id); setRecurringClose(false); setEditWeekday(weekday(date)); setDraft(null); setRecurringEditOpen(true)
   }
 
   function startForm(kind: Draft['kind'] = 'shift', date?: string) {
     if (section === 'rooms' || !selectedPerson?.active) return
-    setView('assign'); setRecurringId(null); setRecurringClose(false)
+    setEditDate(null); setView('assign'); setRecurringId(null); setRecurringClose(false)
     if (kind === 'shift') { setRecurringId(editableJourney(data.recurring_journeys ?? [], employee, staffToday())?.id ?? null); setDraft(null); return }
     const from = date ?? (week < staffToday() ? staffToday() : week)
     setDraft({ role: section, kind, staffId: people.find(p => p.id === employee && p.active)?.id ?? '', from, until: '', days: [weekday(from)], exactDates: null,
@@ -108,7 +111,7 @@ export function StaffShiftsPage({ initialStaffId = '' }: { initialStaffId?: stri
     const editRole = data.staff.find(person => person.id === group.staffId)?.category
     if (editRole !== 'doctor' && editRole !== 'recepcionista') return
     setView('assign')
-    if (group.recurringId) { setView('schedule'); setRecurringEditOpen(true); setEditWeekday(onlyDate ? weekday(onlyDate) : null); setRecurringId(group.recurringId); setRecurringClose(false); setDraft(null); return }
+    if (group.recurringId) { setEditDate(onlyDate ?? null); setView('schedule'); setRecurringEditOpen(true); setEditWeekday(onlyDate ? weekday(onlyDate) : null); setRecurringId(group.recurringId); setRecurringClose(false); setDraft(null); return }
     const selected = onlyDate ? scheduleForDate(group, onlyDate) : group
     const chosen = [...selected.dates]
     setDraft({ role: editRole, kind: group.kind, staffId: group.staffId, from: chosen[0], until: chosen.at(-1)!, days: [...new Set(chosen.map(weekday))], exactDates: chosen,
@@ -153,7 +156,7 @@ export function StaffShiftsPage({ initialStaffId = '' }: { initialStaffId?: stri
   }
   async function deactivate(group: ScheduleGroup) {
     if (section === 'rooms' || busy || !canWrite) return
-    if (group.recurringId) { setView('assign'); setRecurringId(group.recurringId); setRecurringClose(true); setDraft(null); return }
+    if (group.recurringId) { setEditDate(group.dates[0]); setEditWeekday(weekday(group.dates[0])); setRecurringEditOpen(true); setRecurringId(group.recurringId); setRecurringClose(true); setDraft(null); return }
     if (!window.confirm(`¿Desactivar las ${group.dates.length} fechas de este grupo? Se conservará el historial y se rechazarán conflictos con citas.`)) return
     setBusy(true); setError(''); setNotice('')
     try { await savePlanningSet(section, group.kind, { staff_id: group.staffId, active: false }, group.originals); setNotice('Programación desactivada; historial conservado.'); setDraft(null); setRevision(r => r + 1) }
@@ -173,8 +176,8 @@ export function StaffShiftsPage({ initialStaffId = '' }: { initialStaffId?: stri
     } catch (err) { setError(err instanceof Error ? err.message : 'No se pudo guardar el consultorio.') }
     finally { setBusy(false) }
   }
-  const recurringEditor = <RecurringJourneyForm key={`${recurringId ?? 'new'}-${employee}-${recurringClose}-${editWeekday}`} data={data} initialEmployee={employee} initialJourney={data.recurring_journeys?.find(j => j.id === recurringId)} initialRole={role} initialDeactivate={recurringClose} editWeekday={editWeekday} loading={loading} onBusy={setBusy} onRefresh={() => setRevision(r => r + 1)} onManage={manageRecurring} onSaved={(id, date) => { const person = data.staff.find(p => p.id === id); if (person?.category === 'doctor' || person?.category === 'recepcionista') setRole(person.category); setEmployee(id); setWeek(monday(date)); setRecurringId(null); setRecurringEditOpen(false); setEditWeekday(null); setView('schedule'); setNotice('Cambios guardados y verificados. Consulta el calendario actualizado.'); setRevision(r => r + 1) }} />
-  return <div className="space-y-5">
+  const recurringEditor = <RecurringJourneyForm key={`${recurringId ?? 'new'}-${employee}-${recurringClose}-${editWeekday}`} data={data} initialEmployee={employee} initialJourney={data.recurring_journeys?.find(j => j.id === recurringId)} initialRole={role} initialDeactivate={recurringClose} editWeekday={editWeekday} editDate={editDate} loading={loading} onBusy={setBusy} onRefresh={() => setRevision(r => r + 1)} onManage={manageRecurring} onSaved={(id, date) => { const person = data.staff.find(p => p.id === id); if (person?.category === 'doctor' || person?.category === 'recepcionista') setRole(person.category); setEmployee(id); setWeek(monday(date)); setRecurringId(null); setRecurringEditOpen(false); setEditWeekday(null); setView('schedule'); setNotice('Cambios guardados y verificados. Consulta el calendario actualizado.'); setRevision(r => r + 1) }} />
+  return <div className="space-y-5"><p role="status" className="planning-live">{realtime.connected ? '● Horarios sincronizados en tiempo real' : '○ Reconectando: actualización de respaldo cada 30 segundos'}</p>
     <nav className="flex flex-wrap gap-2 rounded-xl border border-slate-200 bg-white p-2" aria-label="Secciones de programación">
       {(['schedule', 'assign', 'rooms'] as const).map((tab, i) => <button type="button" key={tab} disabled={busy} aria-pressed={view === tab} className={`${view === tab ? primary : secondary} flex-1 whitespace-nowrap`} onClick={() => switchView(tab)}>{['Consultar jornadas', 'Asignar jornada', 'Consultorios'][i]}</button>)}
     </nav>

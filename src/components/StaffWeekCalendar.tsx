@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import { Icon } from './Icon'
 import { addDays } from '../lib/planningDates'
-import { employeeWeek, scheduleForDate, staffToday, staffWeek, schoolWeek, minuteLabel, formatStaffTime, type WeekBlock } from '../lib/staffWeek'
+import { employeeWeek, scheduleForDate, staffToday, staffWeek, schoolWeek, minuteLabel, formatStaffTime, filterWeekPeriod, type WeekBlock } from '../lib/staffWeek'
 import { staffName, type PlanningData, type PlanningStaff } from '../lib/planning'
 import type { ScheduleGroup } from '../lib/planningGroups'
 import './StaffWeekCalendar.css'
@@ -13,12 +13,13 @@ function blockTitle(b: WeekBlock, doctor: boolean) {
   return b.kind === 'break' ? b.reason?.replace(/^Descanso:\s*/, '') || 'Descanso' : b.kind === 'shift' ? doctor ? 'Tiempo laboral' : 'Turno de recepci\u00f3n' : labels[b.kind]
 }
 export function StaffWeekCalendar({ data, person, groups, week, onWeek, canEdit, busy, loading, onEdit, onEditComplete, onEditWeekday, onDeactivate, onCreate, onRefresh }: { data: PlanningData; person: PlanningStaff | undefined; groups: ScheduleGroup[]; week: string; onWeek: (week: string) => void; canEdit: boolean; busy: boolean; loading: boolean; onEdit: (group: ScheduleGroup, date: string) => void; onEditComplete?: () => void; onEditWeekday?: (date: string) => void; onDeactivate: (group: ScheduleGroup) => void; onCreate: (date: string) => void; onRefresh: () => void }) {
+  const [period, setPeriod] = useState<'all' | 'day' | 'night'>('all')
   const [inactive, setInactive] = useState(false)
   const [selected, setSelected] = useState<string | null>(null)
   const dialog = useRef<HTMLDialogElement>(null)
   const calendarId = useId()
   const calendar = employeeWeek(data, person?.id ?? '', week, groups, inactive)
-  const timeline = schoolWeek(calendar)
+  const timeline = schoolWeek(filterWeekPeriod(calendar, period))
   const today = staffToday()
   const hasRecurring = Boolean(person && (data.recurring_journeys ?? []).some(j => j.staff_id === person.id && j.active && !j.closed_on && (!j.valid_until || j.valid_until >= today)))
   const day = calendar.find(d => d.date === selected)
@@ -27,7 +28,7 @@ export function StaffWeekCalendar({ data, person, groups, week, onWeek, canEdit,
   const dayGroups = [...new Map((day?.blocks ?? []).filter(b => b.group && b.originDate).map(b => [`${b.group!.key}-${b.originDate}`, { group: b.group!, date: b.originDate! }])).values()]
   return <section className="staff-week" aria-labelledby="staff-week-title"><header className="staff-week-heading"><div><span>LA SEMANA DE TU EQUIPO</span><h2 id="staff-week-title">Calendario semanal</h2><p>{dateLabel(week)} — {dateLabel(addDays(week, 6))} · Hora de El Salvador</p></div>{hasRecurring && <button type="button" disabled={!canEdit || loading || busy || !person?.active} onClick={onEditComplete}>Editar jornada completa</button>}<button type="button" disabled={loading || busy} onClick={onRefresh}><Icon name="calendar" size={17} />Actualizar</button></header>
     <div className="staff-week-toolbar"><div className="staff-week-navigation"><button type="button" disabled={busy} onClick={() => onWeek(addDays(week, -7))}>← Semana anterior</button><button type="button" disabled={busy} onClick={() => onWeek(staffWeek())}>Hoy</button><button type="button" disabled={busy} onClick={() => onWeek(addDays(week, 7))}>Semana siguiente →</button></div><label><input type="checkbox" checked={inactive} onChange={e => setInactive(e.target.checked)} />Mostrar programación desactivada</label></div>
-    <div className="staff-week-legend">{Object.entries(labels).map(([kind, label]) => <span key={kind} className={`legend-${kind}`}><i />{label}</span>)}<span className="legend-empty"><i />Sin jornada</span></div>
+    <label className="staff-period-filter">Mostrar jornadas<select value={period} onChange={e => setPeriod(e.target.value as typeof period)}><option value="all">Todas las jornadas</option><option value="day">Diurna · 6 AM a 6 PM</option><option value="night">Nocturna · 6 PM a 6 AM</option></select></label><div className="staff-week-legend">{Object.entries(labels).map(([kind, label]) => <span key={kind} className={`legend-${kind}`}><i />{label}</span>)}<span className="legend-empty"><i />Sin jornada</span></div>
     <nav className="staff-week-jump" aria-label="Ir directamente a un día">{calendar.map((d, i) => <a key={d.date} href={`#${calendarId}-${d.date}`} aria-current={d.date === today ? 'date' : undefined}><span>{days[i].slice(0, 3)}</span><strong>{d.date.slice(8)}</strong></a>)}</nav>
     {!person && <div className="staff-week-prompt"><Icon name="users" size={28} /><strong>Selecciona un empleado para consultar su semana</strong><p>Solo se mostrará la programación de la persona seleccionada.</p></div>}
     {loading && person && <p role="status" className="staff-week-loading">Consultando la semana seleccionada…</p>}

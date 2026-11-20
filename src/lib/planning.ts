@@ -42,10 +42,16 @@ export async function savePlanningSet(role: 'doctor' | 'recepcionista', kind: st
 export async function deleteConsultingRoom(room: ConsultingRoom): Promise<void> {
   await invokePlanningRpc(connection(), 'delete_staff_consulting_room', { p_id: room.id, p_version: room.version })
 }
-export interface JourneyEditScope { weekday: number | null; originals: RecurringJourney[] }
+export interface JourneyEditScope { weekday: number | null; originals: RecurringJourney[]; date?: string }
 export async function saveRecurringJourney(values: Record<string, unknown>, key: string, journey?: RecurringJourney, scope?: JourneyEditScope) {
   if (!planningWritesEnabled) throw new Error('La configuración de horarios todavía no está habilitada.')
-  const scoped = Boolean(journey && scope && values.active !== false)
+  if (journey && scope?.date) {
+    const data = await invokePlanningRpc<{ id: string }>(connection(), 'save_recurring_journey_day', { p_values: values, p_id: journey.id, p_version: journey.version, p_key: key })
+    if (!data?.id) throw new Error('No se confirmó la operación. Reintenta con los mismos datos.')
+    await confirmRecurringWrite({ read: readPlanning, availability: readAvailability }, values, data.id, journey)
+    return data
+  }
+  const scoped = Boolean(journey && scope)
   const params = { p_values: values, p_id: journey?.id ?? null, p_version: journey?.version ?? null, p_key: key }
   const scopedParams = { ...params, p_weekday: scope?.weekday ?? null, p_originals: scope?.weekday === null ? scope.originals.filter(j => j.active && !j.closed_on && (!j.valid_until || j.valid_until >= String(values.valid_from))).map(j => ({ id: j.id, version: j.version })) : [] }
   if (scoped) await invokePlanningRpc(connection(), 'save_recurring_journey_scope', { ...scopedParams, p_preview: true })

@@ -1,3 +1,4 @@
+import { usePlanningRealtime } from '../lib/usePlanningRealtime'
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { FacilityPicker } from '../components/FacilityPicker'
 import { readAdmissionPhysicians, readDoctorAppointments, readDoctorAvailability, readMyAccess, readPendingAppointmentRequests, readPublicView, rejectAppointmentRequest, scheduleAppointmentRequest, type AppointmentRequest, type AppointmentTimeBlock, type DoctorAppointment, type UserAccess, type AdmissionPhysician } from '../lib/api'
@@ -68,6 +69,7 @@ function statusLabel(status: string): string {
 
 export function AppointmentsPage({ onViewChart }: { onViewChart: (patientId: string) => void }) {
   const { facilities, loading: facilitiesLoading, error: facilitiesError } = useFacilities()
+  const { revision: planningRevision } = usePlanningRealtime()
   const [access, setAccess] = useState<UserAccess | null>(null)
   const [accessError, setAccessError] = useState('')
   const [accessLoading, setAccessLoading] = useState(true)
@@ -211,7 +213,7 @@ export function AppointmentsPage({ onViewChart }: { onViewChart: (patientId: str
     return () => {
       active = false
     }
-  }, [facilityId, scheduleForm?.date, scheduleForm?.physicianId])
+  }, [facilityId, scheduleForm?.date, scheduleForm?.physicianId, planningRevision])
 
   function beginScheduling(request: AppointmentRequest) {
     const departmentId = catalogs.departments[0]?.id ?? ''

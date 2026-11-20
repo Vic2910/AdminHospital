@@ -1,3 +1,4 @@
+import { usePlanningRealtime } from '../lib/usePlanningRealtime'
 import { AgendaDatePicker } from './AgendaDatePicker'
 import { useEffect, useState, type ReactNode } from 'react'
 import { displayTime, loadAgenda, loadRequests, localDate, recordCode, type AttentionRequest, type ReceptionAppointment, type ReceptionPatient } from '../lib/reception'
@@ -13,6 +14,7 @@ export function ReceptionAgenda({ specialties, renderRequest }: { specialties: {
   const [mode, setMode] = useState<'day' | 'requests' | 'walkin'>('day')
   const [date, setDate] = useState(localDate())
   const [revision, setRevision] = useState(0)
+  usePlanningRealtime(() => setRevision(r => r + 1))
   const [rows, setRows] = useState<ReceptionAppointment[]>([])
   const [requests, setRequests] = useState<AttentionRequest[]>([])
   const [more, setMore] = useState(false)

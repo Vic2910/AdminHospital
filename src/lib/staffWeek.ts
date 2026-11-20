@@ -69,3 +69,17 @@ export function schoolWeek(calendar: { date: string; blocks: WeekBlock[] }[]) {
   }).filter(row => row.cells.some(Boolean))
   return { days, rows }
 }
+
+// Clip visible segments at 6 AM / 6 PM; keep original dates and records for editing.
+export function filterWeekPeriod(calendar: { date: string; blocks: WeekBlock[] }[], period: 'all' | 'day' | 'night') {
+  if (period === 'all') return calendar
+  return calendar.map(day => {
+    const midnight = new Date(`${day.date}T00:00:00-06:00`).getTime()
+    const windows = period === 'day' ? [[360, 1080]] : [[0, 360], [1080, 1440]]
+    return { ...day, blocks: day.blocks.flatMap(block => windows.flatMap(([start, end]) => {
+      const a = Math.max(new Date(block.starts_at).getTime(), midnight + start * 60000)
+      const b = Math.min(new Date(block.ends_at).getTime(), midnight + end * 60000)
+      return a < b ? [{ ...block, starts_at: new Date(a).toISOString(), ends_at: new Date(b).toISOString() }] : []
+    })) }
+  })
+}

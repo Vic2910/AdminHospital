@@ -1,3 +1,4 @@
+import { usePlanningRealtime } from '../lib/usePlanningRealtime'
 import { useEffect, useRef, useState } from 'react'
 import { availableSlots, displayTime, localDate, receptionDoctors, receptionRpc, requestAppointment, type ReceptionAppointment, type ReceptionDoctor, type ReceptionPatient, type Slot } from '../lib/reception'
 import { appointmentMatches, bookingCall, definitiveBookingFailure, type BookingIntent } from '../lib/receptionBooking'
@@ -5,6 +6,7 @@ import { Icon } from './Icon'
 import './ReceptionAgenda.css'
 
 export function ReceptionAppointmentScheduler({ patient, code, specialties, requestId, specialtyId, onSaved }: { patient: ReceptionPatient; code: string; specialties: { id: number; name: string }[]; requestId?: string; specialtyId?: number; onSaved: (appointment: ReceptionAppointment) => void }) {
+  const { revision: planningRevision } = usePlanningRealtime()
   const [specialty, setSpecialty] = useState(specialtyId ?? 0)
   const [date, setDate] = useState(localDate())
   const [doctors, setDoctors] = useState<ReceptionDoctor[]>([])
@@ -33,12 +35,12 @@ export function ReceptionAppointmentScheduler({ patient, code, specialties, requ
   }, [patient.id, requestId])
   useEffect(() => {
     let active = true
-    setDoctors([]); setDoctor(''); setSlots([]); setSlot(null); setConfirmed(false); setLoading(false)
+    setDoctors([]); setSlots([]); setSlot(null); setConfirmed(false); setLoading(false)
     if (!specialty || !date || date < localDate()) return
     setLoading(true)
-    receptionDoctors(specialty, date, patient.id).then(result => { if (active) { setDoctors(result.doctors); setComplete(result.complete) } }).catch(e => { if (active) setError(e.message) }).finally(() => { if (active) setLoading(false) })
+    receptionDoctors(specialty, date, patient.id).then(result => { if (active) { setDoctors(result.doctors); setDoctor(previous => result.doctors.some(d => d.id === previous) ? previous : ''); setComplete(result.complete) } }).catch(e => { if (active) setError(e.message) }).finally(() => { if (active) setLoading(false) })
     return () => { active = false }
-  }, [specialty, date, patient.id])
+  }, [specialty, date, patient.id, planningRevision])
   useEffect(() => {
     let active = true
     setSlots([]); setSlot(null); setConfirmed(false)
@@ -46,7 +48,7 @@ export function ReceptionAppointmentScheduler({ patient, code, specialties, requ
     setLoading(true); setError('')
     availableSlots(specialty, date, patient.id, doctor).then(rows => { if (active) setSlots(rows) }).catch(e => { if (active) setError(e.message) }).finally(() => { if (active) setLoading(false) })
     return () => { active = false }
-  }, [doctor, specialty, date, patient.id])
+  }, [doctor, specialty, date, patient.id, planningRevision])
   async function save() {
     if (lock.current || recovering || recoveryError || !confirmed || (!slot && !pending)) return
     const intent: BookingIntent = pending ?? { patientId: patient.id, slot: slot!, specialtyId: specialty, requestId, key: key.current, reason, symptoms }

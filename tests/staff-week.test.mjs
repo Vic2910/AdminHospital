@@ -179,3 +179,16 @@ test('render real del calendario y buscador directo: siete columnas, escala de h
     assert.match(page, /<option value="recepcionista"[^>]*>Recepcionista<\/option>/)
   } finally { await server.close() }
 })
+
+
+test('filtros diurno y nocturno separan una jornada que cruza medianoche', async () => {
+  const { filterWeekPeriod, schoolWeek } = await import('../src/lib/staffWeek.ts')
+  const date = '2030-01-07'
+  const calendar = [{ date, blocks: [{ id: 'night', kind: 'shift', active: true, starts_at: date + 'T00:00:00-06:00', ends_at: date + 'T08:00:00-06:00' }, { id: 'day', kind: 'shift', active: true, starts_at: date + 'T10:00:00-06:00', ends_at: date + 'T16:00:00-06:00' }] }]
+  const day = schoolWeek(filterWeekPeriod(calendar, 'day'))
+  const night = schoolWeek(filterWeekPeriod(calendar, 'night'))
+  assert.deepEqual(day.rows.map(r => [r.start, r.end]), [[360,480],[600,960]])
+  assert.deepEqual(night.rows.map(r => [r.start, r.end]), [[0,360]])
+  assert.equal(filterWeekPeriod(calendar, 'all'), calendar)
+  assert.equal(calendar[0].blocks[0].starts_at, date + 'T00:00:00-06:00')
+})

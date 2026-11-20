@@ -24,9 +24,11 @@ export function editableJourney(journeys: RecurringJourney[], staffId: string, t
 }
 export function validateJourney(values: JourneyValues, doctor: boolean) {
   if (!values.staff_id) return 'Selecciona al empleado.'
-  if (!values.weekdays.length) return 'Selecciona al menos un día laboral.'
+  if (!values.weekdays.length || values.weekdays.some(d => !Number.isInteger(d) || d < 0 || d > 6)) return 'Selecciona al menos un día laboral válido.'
   if (!values.valid_from || (values.valid_until && values.valid_until < values.valid_from)) return 'Comprueba las fechas de vigencia.'
-  if (!/^\d{2}:\d{2}$/.test(values.start_time) || !/^\d{2}:\d{2}$/.test(values.end_time) || values.start_time === values.end_time) return 'La entrada y la salida deben ser diferentes.'
+  const validClock = (value: string) => /^([01]\d|2[0-3]):[0-5]\d$/.test(value)
+  if (!validClock(values.start_time) || !validClock(values.end_time) || values.start_time === values.end_time) return 'La entrada y la salida deben ser horas válidas y diferentes.'
+  if ([...values.breaks, ...values.consultations].some(p => !validClock(p.start_time) || !validClock(p.end_time))) return 'Comprueba las horas de atención y descansos.'
   const minute = (value: string) => { const [h, m] = value.split(':').map(Number); return h * 60 + m }
   const base = minute(values.start_time)
   const offset = (time: string) => minute(time) + (minute(time) < base ? 1440 : 0)
