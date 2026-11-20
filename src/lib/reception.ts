@@ -1,6 +1,7 @@
 import { supabase } from './supabase'
 import { availablePatientSlots } from './receptionBooking'
 import { orderAttentionRequests, type RequestOrder } from './receptionOrdering'
+import { mapPatientRecord } from './receptionPatientRecords'
 import { patientExactFilter, patientMatch, patientPrimaryFilter, patientSearchFilter, patientSearchIntent, patientTextPattern, rankPatientMatches, searchText } from './patientSearch'
 
 export interface AttentionRequest {
@@ -71,6 +72,13 @@ export interface ReceptionPatientMatch extends ReceptionPatient {
   record_id: string | null
 }
 const patientSearchColumns = 'id,profile_id,first_name,last_name,patient_code,dui,birth_date,phone,email,city,registration_source,created_at,medical_records(id,record_code)'
+
+export async function searchPatientsWithRecordCodes(dui: string): Promise<ReceptionPatientMatch[]> {
+  if (!/^\d{8}-\d$/.test(dui)) throw new Error('Escribe el DUI completo: 00000000-0.')
+  const { data, error } = await client().from('patients').select(patientSearchColumns).eq('dui', dui).limit(10)
+  if (error) throw new Error(error.message)
+  return (data ?? []).map(row => mapPatientRecord(row) as ReceptionPatientMatch)
+}
 
 export async function readWalkinRegistration(id: string): Promise<ReceptionPatientMatch> {
   const { data, error } = await client().from('patients').select(patientSearchColumns).eq('id',id).single()

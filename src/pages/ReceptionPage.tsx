@@ -8,7 +8,7 @@ import { IdentityCheck, PatientCard } from '../components/ReceptionIdentity'
 import { HospitalizationPage } from './HospitalizationPage'
 import { Icon } from '../components/Icon'
 import './ReceptionPage.css'
-import { displayTime, linkedPatient, loadRequests, localDate, periodLabels, receptionRows, receptionRpc, recordCode, requestSymptoms, requestAppointment, searchPatients, stateLabels, readAttentionCounts, readAttentionRequest } from '../lib/reception'
+import { displayTime, linkedPatient, loadRequests, localDate, periodLabels, receptionRows, receptionRpc, recordCode, requestSymptoms, requestAppointment, searchPatientsWithRecordCodes, stateLabels, readAttentionCounts, readAttentionRequest } from '../lib/reception'
 import { orderAttentionRequests, type RequestOrder } from '../lib/receptionOrdering'
 import type { AttentionRequest, ReceptionAppointment, ReceptionPatient } from '../lib/reception'
 
@@ -30,6 +30,7 @@ export function ReceptionPage({ initialTab = 'Solicitudes de atención', initial
   const [sort, setSort] = useState<RequestOrder>('oldest')
   const [offset, setOffset] = useState(0)
   const [counts, setCounts] = useState<Record<string, number | null>>({})
+  const [countError, setCountError] = useState(false)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
   const [more, setMore] = useState(false)
@@ -37,13 +38,27 @@ export function ReceptionPage({ initialTab = 'Solicitudes de atención', initial
   useEffect(() => { let active = true; if (initialRequestId) readAttentionRequest(initialRequestId).then(r => { if (active) setSelected(r) }).catch(e => { if (active) setError(message(e)) }); return () => { active = false } }, [initialRequestId])
   useEffect(() => {
     let active = true
-    setLoading(true); setError('')
+    setLoading(true); setError(''); setCountError(false)
     setRequests([]); setMore(false); setOffset(0)
     Promise.all([loadRequests(filter, 0, sort), receptionRows<{ id: number; name: string; active: boolean }>('specialties', 'id,name,active'), readAttentionCounts()]).then(([rows, catalog, totals]) => {
-      if (active) { setRequests(rows.items); setSpecialties(catalog); setMore(rows.hasMore); setCounts(totals) }
+      if (active) { setRequests(rows.items); setSpecialties(catalog); setMore(rows.hasMore); setCounts(totals); setCountError(Object.values(totals).some(value => value === null)) }
     }).catch(e => { if (active) setError(message(e)) }).finally(() => { if (active) setLoading(false) })
     return () => { active = false }
   }, [refresh, filter, sort])
+  useEffect(() => {
+    if (tab !== 'Solicitudes de atención' || selected) return
+    const refreshIfVisible = () => {
+      if (document.visibilityState === 'visible') setRefresh(value => value + 1)
+    }
+    const timer = window.setInterval(refreshIfVisible, 60_000)
+    window.addEventListener('online', refreshIfVisible)
+    document.addEventListener('visibilitychange', refreshIfVisible)
+    return () => {
+      window.clearInterval(timer)
+      window.removeEventListener('online', refreshIfVisible)
+      document.removeEventListener('visibilitychange', refreshIfVisible)
+    }
+  }, [tab, selected])
   const specialtyName = (id: number) => specialties.find(s => s.id === id)?.name ?? 'Sin especialidad disponible'
   async function nextPage() {
     setLoading(true)
@@ -66,6 +81,7 @@ export function ReceptionPage({ initialTab = 'Solicitudes de atención', initial
         </div>
         <div className="request-view-guide"><span className="request-view-chip"><i />{filter ? stateLabels[filter] : 'Por atender'}</span><p>{!filter ? 'Primero las pendientes y luego las que están en revisión.' : `Estás viendo las solicitudes con estado: ${stateLabels[filter]}.`} <span>{sort === 'oldest' ? 'Las más antiguas aparecen primero dentro de cada estado.' : 'Las más recientes aparecen primero dentro de cada estado.'}</span></p></div>
         {error && <p role="alert" className="request-inbox-error"><Icon name="help" size={18} />{error}</p>}
+        {countError && <p role="alert" className="request-inbox-error"><Icon name="help" size={18} />No se pudieron consultar algunos totales. La bandeja sigue disponible; actualiza para volver a intentarlo.</p>}
         {loading && <div className="request-loading" role="status"><span aria-hidden="true" />Buscando las solicitudes del paciente…</div>}
         {!loading && !error && filtered.length === 0 && <div className="request-inbox-empty"><span className="request-empty-icon"><Icon name={query ? 'search' : 'file'} size={30} /></span><h4>{query ? 'No encontramos coincidencias' : !filter ? 'No hay solicitudes por atender' : 'No hay solicitudes en este estado'}</h4><p>{query ? 'Prueba con otro nombre, documento o especialidad de las solicitudes cargadas.' : !filter ? 'Aquí aparecerán las solicitudes pendientes y en revisión. Puedes consultar los otros estados con los filtros de arriba.' : 'Selecciona otro estado para consultar las demás solicitudes.'}</p>{!filter && !query && (counts.agendada ?? 0) > 0 && <button type="button" onClick={() => setFilter('agendada')}><Icon name="calendar" size={17} />Ver citas programadas <span>{counts.agendada}</span></button>}</div>}
         <div className="request-inbox-list">{filtered.map(r => <button key={r.id} type="button" onClick={() => setSelected(r)} className={`reception-request request-${r.status} request-inbox-card`}>
@@ -110,8 +126,8 @@ function RequestDetail({ request, specialty, onBack, onScheduled }: { request: A
     let active = true
     Promise.all([linkedPatient(request), requestSymptoms(request.id), requestAppointment(request.id)]).then(async ([p, s, a]) => {
       const c = p ? await recordCode(p.id) : undefined
-      const found = !p && /^\d{8}-\d$/.test(request.applicant_data?.dui ?? '') ? await searchPatients(request.applicant_data.dui!) : null
-      const codes = found ? Object.fromEntries(await Promise.all(found.map(async candidate => [candidate.id, await recordCode(candidate.id) ?? '']))) : {}
+      const found = !p && /^\d{8}-\d$/.test(request.applicant_data?.dui ?? '') ? await searchPatientsWithRecordCodes(request.applicant_data.dui!) : null
+      const codes = found ? Object.fromEntries(found.map(candidate => [candidate.id, candidate.record_code ?? ''])) : {}
       if (active) { setPatient(p); setCode(c); setSymptoms(s); setAppointment(a); if (found) { setCandidates(found); setCandidateCodes(codes); setSearched(true) } }
     }).catch(e => { if (active) setError(message(e)) }).finally(() => { if (active) setBusy(false) })
     return () => { active = false }
@@ -150,7 +166,7 @@ function RequestDetail({ request, specialty, onBack, onScheduled }: { request: A
           {!code && <ReceptionRecordPreparation patient={patient} request={r} onReady={(p, c) => { setPatient(p); setCode(c); setRequest({ ...r, patient_id: p.id, status: 'en_revision' }); setStep(3) }} /> }
           {!r.patient_id && code && <><IdentityComparison person={person} patient={patient} /><IdentityCheck checked={identity} onChange={setIdentity} disabled={busy} /><button className={button} disabled={busy || !identity} onClick={() => void run(() => verifyPatient(patient))}>Confirmar que corresponde a este paciente<Icon name="check" size={18} /></button></>}
         </> : <>
-          {!searched && <div className="reception-lookup-box"><span className="reception-avatar"><Icon name="search" size={26} /></span><h4>La cuenta aún no tiene un expediente vinculado</h4><p>Esto no significa que el paciente sea nuevo. Busca con su DUI para comprobar si ya existe un registro.</p><div className="reception-document"><span>DUI de la solicitud</span><strong>{person.dui || 'No registrado'}</strong></div><button className={button} disabled={busy || !person.dui} onClick={() => void run(async () => { const found = await searchPatients(person.dui ?? ''); const codes = await Promise.all(found.map(async p => [p.id, await recordCode(p.id) ?? ''])); setCandidates(found); setCandidateCodes(Object.fromEntries(codes)); setIdentity(false); setSearched(true) })}><Icon name="search" size={18} />{busy ? 'Buscando…' : 'Buscar si ya tiene expediente'}</button></div>}
+          {!searched && <div className="reception-lookup-box"><span className="reception-avatar"><Icon name="search" size={26} /></span><h4>La cuenta aún no tiene un expediente vinculado</h4><p>Esto no significa que el paciente sea nuevo. Busca con su DUI para comprobar si ya existe un registro.</p><div className="reception-document"><span>DUI de la solicitud</span><strong>{person.dui || 'No registrado'}</strong></div><button className={button} disabled={busy || !person.dui} onClick={() => void run(async () => { const found = await searchPatientsWithRecordCodes(person.dui ?? ''); setCandidates(found); setCandidateCodes(Object.fromEntries(found.map(p => [p.id, p.record_code ?? '']))); setIdentity(false); setSearched(true) })}><Icon name="search" size={18} />{busy ? 'Buscando…' : 'Buscar si ya tiene expediente'}</button></div>}
           {searched && candidates.length > 0 && <div className="reception-status is-warning" role="status"><Icon name="file" size={26} /><div><strong>Encontramos un paciente registrado con este DUI</strong><p>Compara los datos con el documento del solicitante antes de vincularlo.</p></div></div>}
           {candidates.map(p => <div key={p.id} className="space-y-4"><PatientCard patient={p} code={candidateCodes[p.id]} />{!candidateCodes[p.id] && <p className="reception-help">No se encontró un expediente disponible para este registro. Solicita revisión administrativa si no puedes continuar.</p>}<IdentityComparison person={person} patient={p} />{p.profile_id && p.profile_id !== r.requester_id ? <div className="reception-status is-warning" role="alert"><Icon name="lock" size={22} /><div><strong>Este registro está vinculado a otra cuenta</strong><p>Solicita una revisión administrativa para resolverlo. No crees otro expediente.</p></div></div> : <><IdentityCheck checked={identity} onChange={setIdentity} disabled={busy} /><button className={button} disabled={busy || !identity} onClick={() => { if (!candidateCodes[p.id]) { setPatient(p); setCode(undefined) } else void run(() => verifyPatient(p)) }}>Continuar con este paciente<Icon name="arrowRight" size={18} /></button></>}</div>)}
           {(searched || !person.dui) && candidates.length === 0 && <>
